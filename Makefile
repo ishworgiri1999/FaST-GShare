@@ -1,4 +1,4 @@
-DOCKER_USER=docker.io/kontonpuku666
+DOCKER_USER=docker.io/ishworgiri
 
 .PHONY: clean_crd_gen
 clean_crd_gen:
