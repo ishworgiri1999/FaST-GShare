@@ -172,6 +172,11 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 
 	// update nodesInfo and create dummyPod
 	nodesInfoMtx.Lock()
+
+	if nodesInfo[nodeName] != nil {
+		klog.Info(nodesInfo[nodeName].vGPUID2GPU)
+	}
+
 	if node, has := nodesInfo[nodeName]; !has {
 		pBm := bitmap.NewBitmap(PortRange)
 		pBm.Set(0)
@@ -201,12 +206,12 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 		node.UUID2SchedPort = uuid2port
 		node.DaemonIP = nodeIP
 		node.UUID2GPUType = uuid2type
-		usedUuid := make(map[string]struct{})
-		for _, gpuinfo := range nodesInfo[nodeName].vGPUID2GPU {
-			usedUuid[gpuinfo.UUID] = struct{}{}
+		usedUuid := make(map[string]string)
+		for key, gpuinfo := range nodesInfo[nodeName].vGPUID2GPU {
+			usedUuid[gpuinfo.UUID] = key
 		}
 		for _, uuid := range uuidList {
-			if _, hastmp := usedUuid[uuid]; !hastmp {
+			if key, hastmp := usedUuid[uuid]; !hastmp {
 				vgpuID := fastpodv1.GenerateGPUID(8)
 				mem, _ := strconv.ParseInt(uuid2mem[uuid], 10, 64)
 				node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
@@ -218,6 +223,10 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 					PodList:  list.New(),
 				}
 				go ctr.createDummyPod(nodeName, vgpuID, uuid2type[uuid], uuid)
+			} else {
+				mem, _ := strconv.ParseInt(uuid2mem[uuid], 10, 64)
+				//update memory
+				nodesInfo[nodeName].vGPUID2GPU[key].Mem = mem
 			}
 		}
 	}
