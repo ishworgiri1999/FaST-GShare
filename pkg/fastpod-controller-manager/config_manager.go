@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
+	"github.com/KontonGu/FaST-GShare/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -115,20 +116,24 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 	nodeIP := strings.Split(conn.RemoteAddr().String(), ":")[0]
 	reader := bufio.NewReader(conn)
 
-	var hStr string = ""
 	var err error
 	// get hostname of the node, hostname here is the daemonset's pod name.
-	hStr, err = reader.ReadString('\n')
+	res, err := reader.ReadBytes('\n')
 	if err != nil {
 		klog.Errorf("Error while reading hostname from node information.")
+		klog.Errorf("Error: %v", err)
 		return
 	}
-	parts := strings.Split(hStr, ":")
-	if parts[0] != "hostname" {
-		klog.Errorf("Error while parsing hostname, original string = %s.", hStr)
+	klog.Infof("%v", res)
+	var helloMessage types.ConfiguratorNodeHelloMessage
+	err = types.DecodeFromByte(res, &helloMessage)
+	if err != nil {
+		klog.Errorf("Error while parsing hostname from node information.")
+		klog.Errorf("Error: %v", err)
 		return
 	}
-	daemonPodName := parts[1][:len(parts[1])-1]
+	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
+	daemonPodName := helloMessage.Hostname
 	daemonPod, err := kubeClient.CoreV1().Pods("kube-system").Get(context.TODO(), daemonPodName, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Error cannot find the node daemonset.")
@@ -136,38 +141,47 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 	}
 	nodeName := daemonPod.Spec.NodeName
 
+	// nodeName := helloMessage.Hostname
+
+	var gpuInfoMsg types.GPURegisterMessage
+
 	// get gpu device information
-	gpuInfoMsg, err := reader.ReadString('\n')
+	d, err := reader.ReadBytes('\n')
+	if err != nil {
+		klog.Error("Error while reading gpu device information.")
+		return
+	}
+	err = types.DecodeFromByte(d, &gpuInfoMsg)
 	if err != nil {
 		klog.Error("Error while parsing gpu device information.")
 		return
 	}
-	klog.Infof("Received gpu device information string = %s.", gpuInfoMsg)
-	devsInfo := strings.Split(gpuInfoMsg[:len(gpuInfoMsg)-1], ",")
-	devsNum := len(devsInfo) - 1
+	klog.Infof("Received gpu device information")
+	for _, gpu := range gpuInfoMsg.GPU {
+		klog.Infof("GPU: %v", gpu)
+	}
+
+	devsNum := len(gpuInfoMsg.GPU)
 	klog.Infof("GPU Device number is %d.", devsNum)
 	// scheduler port for each node starts from 52001
 	schedPort := GPUSchedPortStart
 	uuid2port := make(map[string]string, devsNum)
-	uuid2mem := make(map[string]string, devsNum)
+	uuid2mem := make(map[string]uint64, devsNum)
 	uuid2type := make(map[string]string, devsNum)
 	var uuidList []string
 	for i := 0; i < devsNum; i++ {
-		if devsInfo[i] == "" {
-			klog.Errorf("The Device %d in the node %s has no information.", i, nodeName)
-			continue
-		}
-		infoSplit := strings.Split(devsInfo[i], ":")
-		uuidType, mem := infoSplit[0], infoSplit[1]
-		uuidTypeSplit := strings.Split(uuidType, "_")
-		uuid, devType := uuidTypeSplit[0], uuidTypeSplit[1]
 
+		// infoSplit := strings.Split(devsInfo[i], ":")
+		// uuidType, mem := infoSplit[0], infoSplit[1]
+		// uuidTypeSplit := strings.Split(uuidType, "_")
+		// uuid, devType := uuidTypeSplit[0], uuidTypeSplit[1]
+		uuid := gpuInfoMsg.GPU[i].UUID
 		uuid2port[uuid] = strconv.Itoa(schedPort)
 		schedPort += 1
-		uuid2mem[uuid] = mem
-		uuid2type[uuid] = devType
+		uuid2mem[uuid] = gpuInfoMsg.GPU[i].Memory
+		uuid2type[uuid] = gpuInfoMsg.GPU[i].TypeName
 		uuidList = append(uuidList, uuid)
-		klog.Infof("Device Info: uuid = %s, type = %s, mem = %s.", uuid, uuid2type[uuid], uuid2mem[uuid])
+		klog.Infof("Device Info: uuid = %s, type = %s, mem = %d.", uuid, uuid2type[uuid], uuid2mem[uuid])
 	}
 
 	// update nodesInfo and create dummyPod
@@ -189,11 +203,12 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 		}
 		for _, uuid := range uuidList {
 			vgpuID := fastpodv1.GenerateGPUID(8)
-			mem, _ := strconv.ParseInt(uuid2mem[uuid], 10, 64)
+			mem := uuid2mem[uuid]
 			node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
-				GPUType:  uuid2type[uuid],
-				UUID:     uuid,
-				Mem:      mem,
+				GPUType: uuid2type[uuid],
+				UUID:    uuid,
+				//TODO: change Mem to also uint64
+				Mem:      int64(mem),
 				Usage:    0.0,
 				UsageMem: 0,
 				PodList:  list.New(),
@@ -213,20 +228,21 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 		for _, uuid := range uuidList {
 			if key, hastmp := usedUuid[uuid]; !hastmp {
 				vgpuID := fastpodv1.GenerateGPUID(8)
-				mem, _ := strconv.ParseInt(uuid2mem[uuid], 10, 64)
+				mem, _ := uuid2mem[uuid]
 				node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
-					GPUType:  uuid2type[uuid],
-					UUID:     uuid,
-					Mem:      mem,
+					GPUType: uuid2type[uuid],
+					UUID:    uuid,
+					//TODO: change Mem to also uint64
+					Mem:      int64(mem),
 					Usage:    0.0,
 					UsageMem: 0,
 					PodList:  list.New(),
 				}
 				go ctr.createDummyPod(nodeName, vgpuID, uuid2type[uuid], uuid)
 			} else {
-				mem, _ := strconv.ParseInt(uuid2mem[uuid], 10, 64)
 				//update memory
-				nodesInfo[nodeName].vGPUID2GPU[key].Mem = mem
+				node.vGPUID2GPU[key].Mem = int64(uuid2mem[uuid])
+
 			}
 		}
 	}
@@ -247,8 +263,12 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 	}
 	nodesLivenessMtx.Unlock()
 
+	uuidTomMemStringified := make(map[string]string)
+	for uuid, mem := range uuid2mem {
+		uuidTomMemStringified[uuid] = strconv.FormatUint(mem, 10)
+	}
 	// update node annotation to include gpu device information
-	ctr.updateNodeGPUAnnotation(nodeName, &uuid2port, &uuid2mem, &uuid2type)
+	ctr.updateNodeGPUAnnotation(nodeName, &uuid2port, &uuidTomMemStringified, &uuid2type)
 	klog.Infof("updateNodeGPUAnnotation finished. nodeName=%s", nodeName)
 
 	// update pods' gpu resource configuration to configurator
@@ -261,16 +281,30 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 
 	// check the hearbeats and update the ready status of the node
 	for {
-		heartbeatMsg, err := reader.ReadString('\n')
+		heartbeatMsg, err := reader.ReadBytes('\n')
+		klog.Infof(("heartbeatMsg: %v"), heartbeatMsg)
 		hasError := false
+
 		if err != nil {
-			klog.Errorf("Error did not received heartbeat from node %s.", nodeName)
+			klog.Errorf("Error while reading heartbeat message from node %s.", nodeName)
+			klog.Errorf("Error: %v", err)
 			hasError = true
 		}
-		if heartbeatMsg != "heartbeat!\n" {
-			klog.Errorf("Error received invalid heartbeat string from node %s", nodeName)
+		var heartBeat types.ConfiguratorHeartbeatMessage
+		err = types.DecodeFromByte(heartbeatMsg, &heartBeat)
+
+		if err != nil {
+			klog.Errorf("Error while decoding heartbeat message from node %s.", nodeName)
+			klog.Errorf("Error decoding: %v", err)
+			hasError = true
+
+		}
+
+		if !heartBeat.Alive {
+			klog.Errorf("Node %s is not alive.", nodeName)
 			hasError = true
 		}
+
 		nodesLivenessMtx.Lock()
 		if hasError {
 			nodesLiveness[nodeName].Status = NodeNotReady
@@ -334,12 +368,28 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 		return fmt.Errorf(errMsg)
 	}
 	// Write and Sned podlist's GPU resource configuration to the configurator
+
+	podGPUConfig := types.UpdatePodsGPUConfigMessage{
+		GpuUUID:        uuid,
+		PodGPURequests: make([]types.PodGPURequest, podlist.Len()),
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString(uuid)
 	buf.WriteString(":")
 	// write resource configuration
 	if podlist != nil {
 		for pod := podlist.Front(); pod != nil; pod = pod.Next() {
+			podRequest := pod.Value.(*PodReq)
+			podGPUConfig.PodGPURequests = append(podGPUConfig.PodGPURequests, types.PodGPURequest{
+				Key:           podRequest.Key,
+				QtRequest:     podRequest.QtRequest,
+				QtLimit:       podRequest.QtLimit,
+				SMPartition:   podRequest.SMPartition,
+				Memory:        podRequest.Memory,
+				GPUClientPort: podRequest.GPUClientPort,
+			})
+			//TODO: remove string message
 			buf.WriteString(pod.Value.(*PodReq).Key) // pod's namespace + name
 			buf.WriteString(" ")
 			buf.WriteString(fmt.Sprintf("%f", pod.Value.(*PodReq).QtRequest))
@@ -365,8 +415,14 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 	}
 	buf.WriteString("\n")
 
+	getByte, err := types.EncodeToByte(podGPUConfig)
+	if err != nil {
+		klog.Errorf("Error failed to encode UpdatePodsGPUConfigMessage: %v", err)
+		return err
+	}
+
 	klog.Infof("Update the gpu device = %s in the node = %s resource configuration with: %s", uuid, nodeName, buf.String())
-	if _, err := conn.Write(buf.Bytes()); err != nil {
+	if _, err := conn.Write(getByte); err != nil {
 		errMsg := fmt.Sprintf("Failed to write msg to node = %s with the GPU = %s reosurce configuration of pods, write msg = %s.", nodeName, uuid, buf.String())
 		klog.Errorf(errMsg)
 		return fmt.Errorf(errMsg)

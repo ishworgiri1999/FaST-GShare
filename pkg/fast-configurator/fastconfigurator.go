@@ -20,6 +20,7 @@ import (
 
 	"path/filepath"
 
+	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 )
@@ -37,7 +38,7 @@ const (
 	RetryItv                = 10
 )
 
-func Run(deviceCtrManager string) {
+func Run(controllerManagerAddress string) {
 	gcIpFile, err := os.Create(GPUClientsIPFile)
 	if err != nil {
 		klog.Errorf("Error Cannot create the GPUClientsIPFile = %s\n", GPUClientsIPFile)
@@ -58,13 +59,13 @@ func Run(deviceCtrManager string) {
 	os.MkdirAll(FastSchedulerConfigDir, os.ModePerm)
 	os.MkdirAll(GPUClientsPortConfigDir, os.ModePerm)
 
-	klog.Infof("Trying to connet controller-manager....., server IP:Port = %s\n", deviceCtrManager)
+	klog.Infof("Trying to connet controller-manager....., server IP:Port = %s\n", controllerManagerAddress)
 	retryCount := 0
 	var conn net.Conn
 	for retryCount < MaxConnRetries {
-		conn, err = net.Dial("tcp", deviceCtrManager)
+		conn, err = net.Dial("tcp", controllerManagerAddress)
 		if err != nil {
-			klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .", retryCount+1, MaxConnRetries, deviceCtrManager, err)
+			klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .", retryCount+1, MaxConnRetries, controllerManagerAddress, err)
 			klog.Errorf("Retrying in %d seconds...", RetryItv)
 			retryCount++
 			time.Sleep(RetryItv * time.Second)
@@ -78,8 +79,18 @@ func Run(deviceCtrManager string) {
 
 	klog.Info("The connection to the device-controller-manager succeed.")
 	reader := bufio.NewReader(conn)
+	helloMessage := types.ConfiguratorNodeHelloMessage{
+		Hostname: hostname,
+	}
+	klog.Infof("Sending hello message to the device-controller-manager with hostname: %s\n", hostname)
+	b, err := types.EncodeToByte(helloMessage)
 
-	writeMsgToConn(conn, "hostname:"+hostname+"\n")
+	klog.Infof("The encoded hello message: %v\n %d", b, len(b))
+	if err != nil {
+		klog.Fatalf("Error failed to encode ConfiguratorNodeHelloMessage: %v", err)
+	}
+	writeMsgToConn(conn, b)
+
 	registerGPUDevices(conn)
 
 	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
@@ -88,10 +99,10 @@ func Run(deviceCtrManager string) {
 	recvMsgAndWriteConfig(reader)
 }
 
-func writeMsgToConn(conn net.Conn, st string) error {
-	_, err := conn.Write([]byte(st))
+func writeMsgToConn(conn net.Conn, b []byte) error {
+	_, err := conn.Write(b)
 	if err != nil {
-		klog.Errorf("Error failed to write msg: %s\n", st)
+		klog.Errorf("Error failed to write msg: %v", err)
 		return err
 	}
 	return nil
@@ -103,6 +114,11 @@ func registerGPUDevices(conn net.Conn) {
 		klog.Fatalf("Unable to get device count: %v", nvml.ErrorString(ret))
 	}
 	var buf bytes.Buffer
+
+	var gpuinfo types.GPURegisterMessage = types.GPURegisterMessage{
+		GPU: make([]types.GPU, gpu_num),
+	}
+
 	for i := 0; i < gpu_num; i++ {
 		device, ret := nvml.DeviceGetHandleByIndex(i)
 		if ret != nvml.SUCCESS {
@@ -130,51 +146,82 @@ func registerGPUDevices(conn net.Conn) {
 		buf.WriteString(uuidWithType + ":")
 		buf.WriteString(strconv.FormatUint(memsize, 10))
 		buf.WriteString(",")
+
+		gpu := types.GPU{
+			UUID:     uuid,
+			TypeName: gpuTypeName,
+			Memory:   memsize,
+		}
+		gpuinfo.GPU[i] = gpu
 	}
-	buf.WriteString("\n")
+
+	b, err := types.EncodeToByte(gpuinfo)
+	if err != nil {
+		klog.Fatalf("Error failed to encode GPURegisterMessage: %v", err)
+	}
 	klog.Infof("Sucessfully get GPU devices, <uuid>:<memory>,... = %s\n", buf.String())
-	conn.Write(buf.Bytes())
+	conn.Write(b)
 
 }
 
 func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time) {
 	klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
-	writeMsgToConn(conn, "heartbeat!\n")
+	heartbeat := types.ConfiguratorHeartbeatMessage{
+		Alive: true,
+	}
+	beat, err := types.EncodeToByte(heartbeat)
+
+	if err != nil {
+		klog.Fatalf("Error failed to encode ConfiguratorHeartbeatMessage: %v", err)
+	}
+
+	err = writeMsgToConn(conn, beat)
+	if err != nil {
+		klog.Infof("Error failed to write heartbeat msg: %v", err)
+	}
+	klog.Info("First heartbeat sent to fastpod-controller-manager.")
 	for {
 		<-heartTick
 		klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
-		writeMsgToConn(conn, "heartbeat!\n")
+		e := writeMsgToConn(conn, beat)
+		if e != nil {
+			klog.Infof("Error failed to write heartbeat msg: %v", e)
+		}
 	}
 }
 
 func recvMsgAndWriteConfig(reader *bufio.Reader) {
 	klog.Infof("Receiving Resource and Port Configuration from fastpod-controller-manager. \n")
 	for {
-		configMsg, err := reader.ReadString('\n')
+		configMsg, err := reader.ReadBytes('\n')
 		if err != nil {
 			klog.Errorf("Error while Receiving Msg from fastpod-controller-manager")
 			return
 		}
-		handleMsg(configMsg)
+
+		var parsedConfig types.UpdatePodsGPUConfigMessage
+		err = types.DecodeFromByte(configMsg, &parsedConfig)
+		if err != nil {
+			klog.Errorf("Error failed to decode UpdatePodsGPUConfigMessage: %v", err)
+			return
+		}
+
+		handleMsg(parsedConfig)
 	}
 }
 
-func handleMsg(msg string) {
-	klog.Infof("Received message from fastpod-controller-manager: %s", msg)
-	validMsg := string(msg[:len(msg)-1])
-	// write configuration to the scheudler configuration path
-	// The message uses ":" to separate field, "," to separate items of the field
-	msgParsed := strings.Split(validMsg, ":")
-	if len(msgParsed) != 3 {
-		klog.Errorf("Error Received wrong format of configuration msg: %s\n", validMsg)
-		return
-	}
-	uuid, fastSchedConf, gpuClientsPort := msgParsed[0], msgParsed[1], msgParsed[2]
-	klog.Infof("The gpu confiugration message, uuid=%s, fastSchedConf=%s, gpuClientPort=%s", msgParsed[0], msgParsed[1], msgParsed[2])
+func handleMsg(parsedConfig types.UpdatePodsGPUConfigMessage) {
+	klog.Infof("Received message from fastpod-controller-manager: %v", parsedConfig)
+
+	uuid := parsedConfig.GpuUUID
+
+	klog.Infof("The gpu confiugration message, uuid=%s, data=%v\n", uuid, parsedConfig.PodGPURequests)
 	confPath := filepath.Join(FastSchedulerConfigDir, uuid)
 	confFile, err := os.Create(confPath)
 	if err != nil {
+
 		klog.Errorf("Error failed to create the fast scheduler resource configuration file: %s\n.", confPath)
+		klog.Errorf("Error :%v", err)
 	}
 
 	gcPortFilePath := filepath.Join(GPUClientsPortConfigDir, uuid)
@@ -183,13 +230,28 @@ func handleMsg(msg string) {
 		klog.Errorf("Error failed to create the gpu clients' port configuration file: %s\n.", gcPortFilePath)
 	}
 
-	confFile.WriteString(fmt.Sprintf("%d\n", strings.Count(fastSchedConf, ",")))
-	confFile.WriteString(strings.ReplaceAll(fastSchedConf, ",", "\n"))
+	confFile.WriteString(fmt.Sprintf("%d\n", len(parsedConfig.PodGPURequests)))
+
+	for _, podReq := range parsedConfig.PodGPURequests {
+		fastSchedConf := podGPUSchedulerConfigFromat(podReq)
+		confFile.WriteString(fastSchedConf)
+	}
 	confFile.Sync()
 	confFile.Close()
+	gcPortFile.WriteString(fmt.Sprintf("%d\n", len(parsedConfig.PodGPURequests)))
+	for _, podReq := range parsedConfig.PodGPURequests {
+		gpuClientsPort := PodGPUClientsPortConfigFormat(podReq)
+		confFile.WriteString(gpuClientsPort)
+	}
 
-	gcPortFile.WriteString(fmt.Sprintf("%d\n", strings.Count(gpuClientsPort, ",")))
-	gcPortFile.WriteString(strings.ReplaceAll(gpuClientsPort, ",", "\n"))
 	gcPortFile.Sync()
 	gcPortFile.Close()
+}
+
+func podGPUSchedulerConfigFromat(podReq types.PodGPURequest) string {
+	return fmt.Sprintf("%s %f %f %d %d\n", podReq.Key, podReq.QtRequest, podReq.QtLimit, podReq.SMPartition, podReq.Memory)
+}
+
+func PodGPUClientsPortConfigFormat(podReq types.PodGPURequest) string {
+	return fmt.Sprintf("%s %d\n", podReq.Key, podReq.GPUClientPort)
 }
