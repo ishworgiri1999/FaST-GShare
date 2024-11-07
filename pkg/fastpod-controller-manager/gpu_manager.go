@@ -160,6 +160,9 @@ func (ctr *Controller) gpuNodeInit() error {
 		return tmperr
 	}
 	for _, fastpod := range fastpods {
+
+		klog.Infof("Recover the fastpod = %s.", fastpod.ObjectMeta.Name)
+
 		// list the pods of the fastpod
 		selector, err := metav1.LabelSelectorAsSelector(fastpod.Spec.Selector)
 		if err != nil {
@@ -173,6 +176,8 @@ func (ctr *Controller) gpuNodeInit() error {
 		}
 
 		for _, pod := range pods {
+
+			klog.Infof("Recover the pod = %s.", pod.ObjectMeta.Name)
 			quota_req := 0.0
 			quota_limit := 0.0
 			sm_partition := int64(100)
@@ -183,30 +188,36 @@ func (ctr *Controller) gpuNodeInit() error {
 			var tmp_err error
 			quota_limit, tmp_err = strconv.ParseFloat(pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit], 64)
 			if tmp_err != nil || quota_limit > 1.0 || quota_limit < 0.0 {
+				klog.Errorf("Error the quota limit is invalid, pod = %s.", pod.ObjectMeta.Name)
 				continue
 			}
 			quota_req, tmp_err = strconv.ParseFloat(pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest], 64)
 			if tmp_err != nil || quota_limit > 1.0 || quota_limit < 0.0 || quota_limit < quota_req {
+				klog.Errorf("Error the quota request is invalid, pod = %s.", pod.ObjectMeta.Name)
 				continue
 			}
 
 			sm_partition, tmp_err = strconv.ParseInt(pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUSMPartition], 10, 64)
 			if tmp_err != nil || sm_partition < 0 || sm_partition > 100 {
+				klog.Errorf("Error the sm partition is invalid, pod = %s.", pod.ObjectMeta.Name)
 				sm_partition = int64(100)
 				continue
 			}
 
 			gpu_mem, tmp_err = strconv.ParseInt(pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory], 10, 64)
 			if tmp_err != nil || gpu_mem < 0 {
+				klog.Errorf("Error the gpu memory is invalid, pod = %s.", pod.ObjectMeta.Name)
 				continue
 			}
 
 			node_name := pod.Spec.NodeName
 			if node_name == "" {
+				klog.Errorf("Error the node name is empty, pod = %s.", pod.ObjectMeta.Name)
 				continue
 			}
 
-			if vgpu_id_tmp, has := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]; !has {
+			if vgpu_id_tmp, has := pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]; !has {
+				klog.Errorf("Error the vgpu id is not set, pod = %s.", pod.ObjectMeta.Name)
 				continue
 			} else {
 				vgpu_id = vgpu_id_tmp
