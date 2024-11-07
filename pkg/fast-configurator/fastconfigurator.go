@@ -241,7 +241,7 @@ func handleMsg(parsedConfig types.UpdatePodsGPUConfigMessage) {
 	gcPortFile.WriteString(fmt.Sprintf("%d\n", len(parsedConfig.PodGPURequests)))
 	for _, podReq := range parsedConfig.PodGPURequests {
 		gpuClientsPort := PodGPUClientsPortConfigFormat(podReq)
-		confFile.WriteString(gpuClientsPort)
+		gcPortFile.WriteString(gpuClientsPort)
 	}
 
 	gcPortFile.Sync()
