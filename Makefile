@@ -137,3 +137,10 @@ helm_install_fast-gshare-fn:
 helm_uninstall_fast-gshare-fn:
 	helm uninstall fast-gshare --namespace fast-gshare
 	kubectl delete pod -l fastgshare/role=dummyPod -n kube-system
+
+
+run-controller:
+	go run cmd/fastpod-controller-manager/main.go -kubeconfig=$HOME/.kube/config
+
+run-configurator:
+	sudo ./main -ctr_mgr_ip_port localhost:10086
