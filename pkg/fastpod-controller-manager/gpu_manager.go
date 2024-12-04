@@ -183,7 +183,6 @@ func (ctr *Controller) gpuNodeInit() error {
 			sm_partition := int64(100)
 			gpu_mem := int64(0)
 			vgpu_id := ""
-
 			// check the validity of resource configuration values
 			var tmp_err error
 			quota_limit, tmp_err = strconv.ParseFloat(pod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit], 64)
@@ -248,7 +247,6 @@ func (ctr *Controller) gpuNodeInit() error {
 				GPUClientPort: podPort,
 			})
 			node.DaemonPortAlloc.Set(podPort - GPUClientPortStart)
-
 		}
 
 	}
@@ -402,18 +400,18 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 	}
 
 	if podreq, isFound := FindInQueue(key, gpuInfo.PodList); !isFound {
-		if tmpUsg := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0); tmpUsg > 1.0 {
+		newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
+		if newSMUsage > 1.0 {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough compute resource to pod %s, GPUAllocated=%f, GPUReq=%f.", gpuInfo.UUID, vGPUID, key, gpuInfo.Usage, quotaReq*(float64(smPartition)/100.0))
+			for k := gpuInfo.PodList.Front(); k != nil; k = k.Next() {
+				klog.Infof("Pod = %s, Usage=%f, MemUsage=%d", k.Value.(*PodReq).Key, k.Value.(*PodReq).QtRequest*(float64(k.Value.(*PodReq).SMPartition)/100.0), k.Value.(*PodReq).Memory)
+			}
 			return "", 3
-		} else {
-			gpuInfo.Usage = tmpUsg
 		}
-
-		if tmpMem := gpuInfo.UsageMem + gpuMem; tmpMem > gpuInfo.Mem {
+		newMemoryUsage := gpuInfo.UsageMem + gpuMem
+		if newMemoryUsage > gpuInfo.Mem {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough memory to pod %s, MemUsed=%d, MemReq=%d, MemTotal=%d.", gpuInfo.UUID, vGPUID, key, gpuInfo.UsageMem, gpuMem, gpuInfo.Mem)
 			return "", 4
-		} else {
-			gpuInfo.UsageMem = tmpMem
 		}
 
 		newPort := node.DaemonPortAlloc.FindFirstUnsetAndSet()
@@ -423,6 +421,9 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 			klog.Errorf("Error the ports for gpu clients are full. node=%s.", nodeName)
 			return "", 5
 		}
+
+		gpuInfo.Usage = newSMUsage
+		gpuInfo.UsageMem = newMemoryUsage
 
 		gpuInfo.PodList.PushBack(&PodReq{
 			Key:           key,
