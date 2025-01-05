@@ -371,7 +371,7 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 
 	podGPUConfig := types.UpdatePodsGPUConfigMessage{
 		GpuUUID:        uuid,
-		PodGPURequests: make([]types.PodGPURequest, podlist.Len()),
+		PodGPURequests: make([]types.PodGPURequest, 0, podlist.Len()),
 	}
 
 	var buf bytes.Buffer
