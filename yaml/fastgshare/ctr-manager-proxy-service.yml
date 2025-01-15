@@ -15,19 +15,15 @@ apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
   name: fastpod-controller-manager-svc
-  namespace:
-    kube-system
-    # as a prefix for the name of the EndpointSlice
+  namespace: kube-system
   labels:
-    # You should set the "kubernetes.io/service-name" label.
-    # Set its value to match the name of the Service
     kubernetes.io/service-name: fastpod-controller-manager-svc
 addressType: IPv4
 ports:
-  - name: http # should match with the name of the service port defined above
+  - name: http
     appProtocol: http
     protocol: TCP
     port: 10086
 endpoints:
   - addresses:
-      - "192.168.128.88"
+      - "172.24.65.11"

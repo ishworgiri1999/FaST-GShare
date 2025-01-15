@@ -74,7 +74,7 @@ var (
 	// record all fastpods and gpu information (allocation/available)
 	nodesInfo    map[string]*NodeStatusInfo = make(map[string]*NodeStatusInfo)
 	nodesInfoMtx sync.Mutex
-
+	gpuManager   *GPUManager
 	// mapping from fastpod name to its corresponding pod list;
 	fstp2Pods    map[string]*list.List = make(map[string]*list.List)
 	fstp2PodsMtx sync.Mutex
@@ -400,7 +400,10 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 	}
 
 	if podreq, isFound := FindInQueue(key, gpuInfo.PodList); !isFound {
-		newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
+		// newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
+		//Without TIME Quota
+		newSMUsage := gpuInfo.Usage + (float64(smPartition) / 100.0)
+
 		if newSMUsage > 1.0 {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough compute resource to pod %s, GPUAllocated=%f, GPUReq=%f.", gpuInfo.UUID, vGPUID, key, gpuInfo.Usage, quotaReq*(float64(smPartition)/100.0))
 			for k := gpuInfo.PodList.Front(); k != nil; k = k.Next() {
@@ -516,7 +519,9 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 						podlist.Remove(podreq)
 						uuid := gpu.UUID
 
-						gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
+						// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
+						gpu.Usage -= (float64(podreqValue.SMPartition) / 100.0)
+
 						gpu.UsageMem -= podreqValue.Memory
 						ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
 						node.DaemonPortAlloc.Clear(podreqValue.GPUClientPort - GPUClientPortStart)
