@@ -39,6 +39,7 @@ const (
 	FaSTGShareDummyPodName     = "fastgshare-vgpu"
 	FaSTGShareDummyPodUUID     = "fastgshare/vgpu_uuid"
 	OriginalNvidiaResourceName = "nvidia.com/gpu"
+	FaSTGSharePrefferedGPUType = "fastgshare/preferred_gpu_type"
 )
 
 // +genclient

@@ -18,6 +18,8 @@ package fastpodcontrollermanager
 
 import (
 	"fmt"
+	"log"
+	"strings"
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -31,18 +33,30 @@ func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, qu
 		errInfo := fmt.Errorf("Error Cannot find gpu node with the lable \"gpu:present\"")
 		utilruntime.HandleError(errInfo)
 	}
+	// fastpod.Annotations
 	// schedNode := "kgpu1"
 	schedNode := nodeList[0].Name
+
+	prefereredGPU := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGSharePrefferedGPUType]
+
+	schedNode = "i10se14"
 	klog.Infof("current node name: %s.", schedNode)
 	//curently tmmporary use
-
+	klog.Infof("Prefered GPU: %s", prefereredGPU)
 	nodesInfoMtx.Lock()
 	defer nodesInfoMtx.Unlock()
 	node := nodesInfo[schedNode]
 	var vgpuID string
-	for key, _ := range node.vGPUID2GPU {
+	for key, g := range node.vGPUID2GPU {
+		log.Printf("List GPU: %v", g)
 		vgpuID = key
+		if prefereredGPU != "" && strings.Contains(g.GPUType, prefereredGPU) {
+			log.Printf("Selecting Preferred GPU %s", prefereredGPU)
+			break
+		}
 	}
+
+	log.Printf("Selected GPU id: %s", vgpuID)
 
 	if schedNode == "" {
 		klog.Infof("No enough resources for Pod of a FaSTPod=%s/%s", fastpod.ObjectMeta.Namespace, fastpod.ObjectMeta.Name)

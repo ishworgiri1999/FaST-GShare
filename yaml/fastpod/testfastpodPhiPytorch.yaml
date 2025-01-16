@@ -7,20 +7,20 @@ metadata:
     fastgshare/gpu_quota_request: "0.5"
     fastgshare/gpu_quota_limit: "0.5"
     fastgshare/gpu_sm_partition: "50"
-    fastgshare/gpu_mem: "6294967296"
+    fastgshare/gpu_mem: "16294967296"
 spec:
   replicas: 1
   podSpec:
     containers:
       - name: phi3-mini-4k
-        image: ishworgiri/phi3-mini-onnxruntime
+        image: ishworgiri/phi3-mini-pytorch
         imagePullPolicy: Always #IfNotPresent
         ports:
           - containerPort: 8080
         volumeMounts:
           - name: "model-volume"
-            mountPath: "models/phi3-mini-4k-onnx"
+            mountPath: "/models/phi3-mini-4k-pytorch/"
     volumes:
       - name: "model-volume"
         hostPath:
-          path: "/u/home/gii/fast-gshare/phi3/cuda/cuda-int4-rtn-block-32"
+          path: "/u/home/gii/fast-gshare/mod/"
