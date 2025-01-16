@@ -14,7 +14,7 @@ fi
 if [ ! -e /fastpod/library/libfast.so.1 ]; then
     echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
     if [ ! -e /fastpod/library ]; then
-        sudo mkdir /fastpod/library
+        sudo mkdir -p /fastpod/library
     fi
     sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
 fi
