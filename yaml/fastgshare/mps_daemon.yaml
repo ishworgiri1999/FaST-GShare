@@ -26,16 +26,20 @@ spec:
           image: nvidia/mps
           volumeMounts:
             - name: nvidia-mps
-              mountPath: /tmp/nvidia-mps
+              mountPath: /fastpod/mps
           env:
             - name: NVIDIA_REQUIRE_VOLTA
               value: "arch>=5.0"
+            - name: CUDA_MPS_PIPE_DIRECTORY
+              value: /fastpod/mps/tmp
+            - name: CUDA_MPS_LOG_DIRECTORY
+              value: /fastpod/mps/log
           securityContext:
             capabilities:
               add: ["SYS_ADMIN"]
       volumes:
         - name: nvidia-mps
           hostPath:
-            path: /tmp/nvidia-mps
+            path: /fastpod/mps
 
     
