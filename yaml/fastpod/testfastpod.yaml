@@ -8,6 +8,7 @@ metadata:
     fastgshare/gpu_quota_limit: "0.8"
     fastgshare/gpu_sm_partition: "50"
     fastgshare/gpu_mem: "2700000000"
+    fastgshare/preferred_gpu_type: "A100"
 spec:
   replicas: 1
   podSpec:
@@ -18,6 +19,7 @@ spec:
       # env:
       #   - name: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE
       #     value: "60"
+      
       ports:
       - containerPort: 5000
         hostPort: 5000

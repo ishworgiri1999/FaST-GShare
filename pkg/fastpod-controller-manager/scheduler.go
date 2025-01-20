@@ -37,27 +37,40 @@ func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, qu
 	// schedNode := "kgpu1"
 	schedNode := ""
 	var vgpuID string
+	prefereredGPU := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGSharePrefferedGPUType]
+	foundPreferred := false
+	nodesInfoMtx.Lock()
+	defer nodesInfoMtx.Unlock()
 
 	for _, node := range nodeList {
-
-		prefereredGPU := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGSharePrefferedGPUType]
-
 		schedNode = node.Name
 		klog.Infof("current node name: %s.", schedNode)
 		//curently tmmporary use
 		klog.Infof("Prefered GPU: %s", prefereredGPU)
-		nodesInfoMtx.Lock()
-		defer nodesInfoMtx.Unlock()
+
 		node := nodesInfo[schedNode]
+
+		log.Printf("node %s has %d GPUs", schedNode, len(node.vGPUID2GPU))
 		for key, g := range node.vGPUID2GPU {
 			log.Printf("List GPU: %v", g)
-			vgpuID = key
 			if prefereredGPU != "" && strings.Contains(g.GPUType, prefereredGPU) {
+				vgpuID = key
+				foundPreferred = true
 				log.Printf("Selecting Preferred GPU %s", prefereredGPU)
 				break
+			} else {
+				vgpuID = key
 			}
 		}
+		if foundPreferred {
+			break
+		}
 
+	}
+
+	if prefereredGPU != "" && !foundPreferred {
+		log.Printf("Preferred GPU %s not found, cant schedule", prefereredGPU)
+		vgpuID = ""
 	}
 
 	log.Printf("Selected GPU id: %s", vgpuID)

@@ -282,7 +282,6 @@ func (ctr *Controller) initNodeInfo(conn net.Conn) {
 	// check the hearbeats and update the ready status of the node
 	for {
 		heartbeatMsg, err := reader.ReadBytes('\n')
-		klog.Infof(("heartbeatMsg: %v"), heartbeatMsg)
 		hasError := false
 
 		if err != nil {
