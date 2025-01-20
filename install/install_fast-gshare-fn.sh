@@ -11,18 +11,18 @@ else
     exit
 fi
 
-if [ ! -e /fastpod/library/libfast.so.1 ]; then
-    echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
-    if [ ! -e /fastpod/library ]; then
-        sudo mkdir -p /fastpod/library
-    fi
-    sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
-fi
+# if [ ! -e /fastpod/library/libfast.so.1 ]; then
+#     echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
+#     if [ ! -e /fastpod/library ]; then
+#         sudo mkdir -p /fastpod/library
+#     fi
+#     sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
+# fi
 
-if [ ! -e /models ]; then
-    echo "models dir is missing. creating /models."
-    sudo mkdir /models
-fi
+# if [ ! -e /models ]; then
+#     echo "models dir is missing. creating /models."
+#     sudo mkdir /models
+# fi
 
 ## clear fastpod existed deployemnt configuration and use helm to intall fast-gshare-fn 
 ## which already includes fastpod deployment

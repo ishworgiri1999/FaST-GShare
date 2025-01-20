@@ -77,7 +77,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			},
 			corev1.VolumeMount{
 				Name:      "nvidia-mps",
-				MountPath: "/tmp/nvidia-mps",
+				MountPath: "/fastpod/mps",
 			},
 		)
 		ctn.ImagePullPolicy = fastpod.Spec.PodSpec.Containers[0].ImagePullPolicy
@@ -96,7 +96,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			Name: "nvidia-mps",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/tmp/nvidia-mps",
+					Path: "/fastpod/mps",
 				},
 			},
 		},

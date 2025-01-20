@@ -74,7 +74,6 @@ var (
 	// record all fastpods and gpu information (allocation/available)
 	nodesInfo    map[string]*NodeStatusInfo = make(map[string]*NodeStatusInfo)
 	nodesInfoMtx sync.Mutex
-	gpuManager   *GPUManager
 	// mapping from fastpod name to its corresponding pod list;
 	fstp2Pods    map[string]*list.List = make(map[string]*list.List)
 	fstp2PodsMtx sync.Mutex
