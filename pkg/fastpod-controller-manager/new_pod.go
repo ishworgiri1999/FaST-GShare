@@ -42,11 +42,11 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_PIPE_DIRECTORY",
-				Value: "fastpod/mps/tmp",
+				Value: "/fastpod/mps/tmp",
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_LOG_DIRECTORY",
-				Value: "fastpod/mps/log",
+				Value: "/fastpod/mps/log",
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
