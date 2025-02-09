@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"strings"
 
 	fastconfigurator "github.com/KontonGu/FaST-GShare/pkg/fast-configurator"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -28,35 +27,6 @@ func main() {
 		}
 	}()
 
-	gpu_num, ret := nvml.DeviceGetCount()
-	if ret != nvml.SUCCESS {
-		klog.Fatalf("Unable to get device count: %v", nvml.ErrorString(ret))
-	}
-	klog.Infof("The number of gpu devices: %d\n", gpu_num)
-	for i := 0; i < gpu_num; i++ {
-		device, ret := nvml.DeviceGetHandleByIndex(i)
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get device at index %d: %v", i, nvml.ErrorString(ret))
-		}
-
-		meminfo, ret := device.GetMemoryInfo()
-		memsize := meminfo.Total
-		klog.Infof("Memory Size = %d\n", memsize)
-
-		uuid, ret := device.GetUUID()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get uuid of device at index %d: %v", i, nvml.ErrorString(ret))
-		}
-		klog.Infof("UUID: %v\n", uuid)
-
-		gpu_type_name, ret := device.GetName()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get name of device at index %d: %v", i, nvml.ErrorString(ret))
-		}
-		type_name := strings.Split(gpu_type_name, " ")[1]
-		klog.Infof("GPU %d=%s\n", i, type_name)
-
-	}
 	fastconfigurator.Run(ctr_mgr_ip_port)
 
 }
