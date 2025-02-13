@@ -42,8 +42,8 @@ func SetupMPSEnvironment(gpu *GPU) error {
 // Create required directories for MPS
 func CreateDirectories(uuid string) error {
 	dirs := []string{
-		fmt.Sprintf("/tmp/mps_%s", uuid),
-		fmt.Sprintf("/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("/fastpod/mps/tmp/mps_%s", uuid),
+		fmt.Sprintf("/fastpod/mps/tmp/mps_log_%s", uuid),
 	}
 
 	for _, dir := range dirs {
