@@ -42,8 +42,8 @@ func SetupMPSEnvironment(gpu *GPU) error {
 // Create required directories for MPS
 func CreateDirectories(uuid string) error {
 	dirs := []string{
-		fmt.Sprintf("/fastpod/mps/tmp/mps_%s", uuid),
-		fmt.Sprintf("/fastpod/mps/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("/tmp/mps_%s", uuid),
+		fmt.Sprintf("/tmp/mps_log_%s", uuid),
 	}
 
 	for _, dir := range dirs {
@@ -59,8 +59,8 @@ func CreateDirectories(uuid string) error {
 func BuildEnvironment(uuid string) []string {
 	return []string{
 		fmt.Sprintf("CUDA_VISIBLE_DEVICES=%s", uuid),
-		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/fastpod/mps/tmp/mps_%s", uuid),
-		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/fastpod/mps/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_%s", uuid),
+		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log_%s", uuid),
 	}
 }
 

@@ -1,5 +1,5 @@
 DOCKER_USER=docker.io/ishworgiri
-
+ARCH=linux/amd64
 .PHONY: clean_crd_gen
 clean_crd_gen:
 	rm -r pkg/client && rm -r pkg/apis/fastgshare.caps.in.tum/v1/zz_generated.deepcopy.go
@@ -86,7 +86,7 @@ test-fast-configurator-container: build-fast-configurator-container upload-fast-
 
 .PHONY: build-fast-configurator-container
 build-fast-configurator-container:
-	docker build -t ${DOCKER_USER}/fast-configurator:release -f docker/fast-configurator/Dockerfile .
+	docker build  --platform ${ARCH} -t ${DOCKER_USER}/fast-configurator:release -f docker/fast-configurator/Dockerfile .
 
 .PHONY: upload-fast-configurator-image
 upload-fast-configurator-image:

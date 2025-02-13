@@ -4,7 +4,6 @@ import (
 	"flag"
 
 	fastconfigurator "github.com/KontonGu/FaST-GShare/pkg/fast-configurator"
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	klog "k8s.io/klog/v2"
 )
 
@@ -13,19 +12,10 @@ var (
 )
 
 func main() {
+	klog.Infof("Starting FaST-GShare configurator main...")
+
 	klog.InitFlags(nil)
 	flag.Parse()
-	ret := nvml.Init()
-	if ret != nvml.SUCCESS {
-		klog.Fatalf("Unable to initialize NVML: %v", nvml.ErrorString(ret))
-		select {}
-	}
-	defer func() {
-		ret := nvml.Shutdown()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to shutdown NVML: %v", nvml.ErrorString(ret))
-		}
-	}()
 
 	fastconfigurator.Run(ctr_mgr_ip_port)
 

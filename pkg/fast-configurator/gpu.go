@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 type ComputeCapability struct {
@@ -30,6 +31,7 @@ func (g *GPU) isUsable() bool {
 }
 func GetGPUs() []*GPU {
 
+	klog.Info("Getting GPUs from NVML")
 	var gpus []*GPU
 
 	ret := nvml.Init()
@@ -42,6 +44,7 @@ func GetGPUs() []*GPU {
 			log.Fatalf("Unable to shutdown NVML: %v", nvml.ErrorString(ret))
 		}
 	}()
+	klog.Info("Initialized NVML")
 
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {

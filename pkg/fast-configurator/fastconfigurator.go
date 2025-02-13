@@ -42,6 +42,7 @@ const (
 )
 
 func Run(controllerManagerAddress string) {
+	klog.Infof("Starting FaST-GShare configurator...")
 
 	gpus := GetGPUs()
 	//filter out non-usable GPUs, mig parents are not usable

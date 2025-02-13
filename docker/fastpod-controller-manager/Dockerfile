@@ -1,4 +1,4 @@
-FROM golang:1.22 AS build
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.22 as build
 
 ENV GOLANG_VERSION 1.22.0
 ENV PATH $PATH:/usr/local/go/bin

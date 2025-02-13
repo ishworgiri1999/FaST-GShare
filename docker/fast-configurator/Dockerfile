@@ -1,7 +1,5 @@
-FROM golang:1.22 AS build
+FROM --platform=linux/amd64 golang:1.22 AS build
 
-ENV GOLANG_VERSION 1.22.0
-ENV PATH $PATH:/usr/local/go/bin
 
 WORKDIR /go/src/github.com/KontonGu/FaST-GShare
 
@@ -13,10 +11,10 @@ COPY . .
 
 RUN make fast-configurator
 
-FROM nvidia/cuda:12.2.2-base-ubuntu22.04
+FROM --platform=linux/amd64 nvidia/cuda:12.5.0-base-ubuntu22.04
 
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILTIES=utility
+ENV NVIDIA_DRIVER_CAPABILITIES=utility
 
 COPY --from=build /go/src/github.com/KontonGu/FaST-GShare/cmd/fast-configurator/fast-configurator /usr/bin/fast-configurator
 
