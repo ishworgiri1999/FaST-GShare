@@ -11,7 +11,11 @@ COPY . .
 
 RUN make fast-configurator
 
-FROM --platform=linux/amd64 nvidia/cuda:12.5.0-base-ubuntu22.04
+
+
+FROM --platform=linux/amd64 nvidia/cuda:12.2.0-base-ubuntu22.04
+
+
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility

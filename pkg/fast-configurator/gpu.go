@@ -64,7 +64,10 @@ func GetGPUs() []*GPU {
 		}
 
 		memory, ret := device.GetMemoryInfo()
-		if ret != nvml.SUCCESS {
+		if ret == nvml.ERROR_NO_PERMISSION {
+			//skip issue for now
+
+		} else if ret != nvml.SUCCESS {
 			log.Fatalf("Unable to get memory info of device at index %d: %v", i, nvml.ErrorString(ret))
 		}
 
@@ -76,6 +79,7 @@ func GetGPUs() []*GPU {
 		if ret != nvml.SUCCESS {
 			log.Fatalf("Unable to get uuid of device at index %d: %v", i, nvml.ErrorString(ret))
 		}
+
 		gpu := &GPU{
 			Name:   name,
 			UUID:   uuid,

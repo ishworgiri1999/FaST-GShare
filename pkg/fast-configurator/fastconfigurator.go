@@ -41,15 +41,21 @@ const (
 	RetryItv                = 10
 )
 
-func Run(controllerManagerAddress string) {
+func Run(controllerManagerAddress string, mps bool) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
 	gpus := GetGPUs()
 	//filter out non-usable GPUs, mig parents are not usable
 	gpus = FilterUsable(gpus)
-	defer StopMPS(gpus)
+	if mps {
+		err := StartMPS(gpus)
+		if err != nil {
+			klog.Fatalf("Error failed to start MPS: %v", err)
+		}
 
-	StartMPS(gpus)
+		defer StopMPS(gpus)
+
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -126,14 +132,6 @@ func Run(controllerManagerAddress string) {
 
 	recvMsgAndWriteConfig(reader)
 
-}
-
-func runMPS(gpus []*GPU, sigChan chan os.Signal) {
-	StartMPS(gpus)
-	defer StopMPS(gpus)
-
-	<-sigChan
-	print("Received signal, shutting down MPS")
 }
 
 func writeMsgToConn(conn net.Conn, b []byte) error {
