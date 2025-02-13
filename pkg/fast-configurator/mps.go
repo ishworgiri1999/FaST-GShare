@@ -59,8 +59,8 @@ func CreateDirectories(uuid string) error {
 func BuildEnvironment(uuid string) []string {
 	return []string{
 		fmt.Sprintf("CUDA_VISIBLE_DEVICES=%s", uuid),
-		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_%s", uuid),
-		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/fastpod/mps/tmp/mps_%s", uuid),
+		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/fastpod/mps/tmp/mps_log_%s", uuid),
 	}
 }
 
