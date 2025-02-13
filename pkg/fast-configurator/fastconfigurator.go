@@ -14,16 +14,19 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"path/filepath"
 
 	"github.com/KontonGu/FaST-GShare/pkg/types"
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 )
+
+const MPS_START_PATH = "/tmp/mps_"
 
 var (
 	GPUClientsIPEnv = "FaSTPod_GPUClientsIP"
@@ -39,6 +42,17 @@ const (
 )
 
 func Run(controllerManagerAddress string) {
+
+	gpus := GetGPUs()
+	//filter out non-usable GPUs, mig parents are not usable
+	gpus = FilterUsable(gpus)
+	defer StopMPS(gpus)
+
+	StartMPS(gpus)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	gcIpFile, err := os.Create(GPUClientsIPFile)
 	if err != nil {
 		klog.Errorf("Error Cannot create the GPUClientsIPFile = %s\n", GPUClientsIPFile)
@@ -63,13 +77,20 @@ func Run(controllerManagerAddress string) {
 	retryCount := 0
 	var conn net.Conn
 	for retryCount < MaxConnRetries {
+
 		conn, err = net.Dial("tcp", controllerManagerAddress)
 		if err != nil {
 			klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .", retryCount+1, MaxConnRetries, controllerManagerAddress, err)
 			klog.Errorf("Retrying in %d seconds...", RetryItv)
 			retryCount++
-			time.Sleep(RetryItv * time.Second)
-			continue
+			select {
+			case <-sigChan:
+				klog.Info("Received signal during connection attempt, aborting")
+				return
+			case <-time.After(RetryItv * time.Second):
+				continue
+			}
+
 		}
 		break
 	}
@@ -91,12 +112,27 @@ func Run(controllerManagerAddress string) {
 	}
 	writeMsgToConn(conn, b)
 
-	registerGPUDevices(conn)
+	registerGPUDevices(conn, gpus)
 
 	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
 	go sendNodeHeartbeats(conn, nodeHeartbeater.C)
 
+	go func() {
+		<-sigChan
+		conn.Close()
+		klog.Infof("Received signal, shutting down fast-configurator")
+	}()
+
 	recvMsgAndWriteConfig(reader)
+
+}
+
+func runMPS(gpus []*GPU, sigChan chan os.Signal) {
+	StartMPS(gpus)
+	defer StopMPS(gpus)
+
+	<-sigChan
+	print("Received signal, shutting down MPS")
 }
 
 func writeMsgToConn(conn net.Conn, b []byte) error {
@@ -108,11 +144,9 @@ func writeMsgToConn(conn net.Conn, b []byte) error {
 	return nil
 }
 
-func registerGPUDevices(conn net.Conn) {
-	gpu_num, ret := nvml.DeviceGetCount()
-	if ret != nvml.SUCCESS {
-		klog.Fatalf("Unable to get device count: %v", nvml.ErrorString(ret))
-	}
+func registerGPUDevices(conn net.Conn, gpus []*GPU) {
+
+	gpu_num := len(gpus)
 	var buf bytes.Buffer
 
 	var gpuinfo types.GPURegisterMessage = types.GPURegisterMessage{
@@ -120,26 +154,10 @@ func registerGPUDevices(conn net.Conn) {
 	}
 
 	for i := 0; i < gpu_num; i++ {
-		device, ret := nvml.DeviceGetHandleByIndex(i)
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get device at index %d: %v", i, nvml.ErrorString(ret))
-		}
 
-		meminfo, ret := device.GetMemoryInfo()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get GPU memory %d: %v", i, nvml.ErrorString(ret))
-		}
-		memsize := meminfo.Total
-
-		uuid, ret := device.GetUUID()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get uuid of device at index %d: %v", i, nvml.ErrorString(ret))
-		}
-
-		oriGPUType, ret := device.GetName()
-		if ret != nvml.SUCCESS {
-			klog.Fatalf("Unable to get name of device at index %d: %v", i, nvml.ErrorString(ret))
-		}
+		uuid := gpus[i].UUID
+		memsize := gpus[i].Memory
+		oriGPUType := gpus[i].Name
 		gpuTypeName := strings.Split(oriGPUType, " ")[1]
 
 		uuidWithType := uuid + "_" + gpuTypeName
