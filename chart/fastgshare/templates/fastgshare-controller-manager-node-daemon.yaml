@@ -134,6 +134,8 @@ spec:
       - name: fast-configurator-ctn
         # image: kontonpuku666/fast-configurator:release
         image: {{ .Values.fastgshareNodeDaemon.fastConfigurator.image }}
+        imagePullPolicy: "Always"
+
         volumeMounts:
         - name: fastpod-library
           mountPath: "/fastpod/library"

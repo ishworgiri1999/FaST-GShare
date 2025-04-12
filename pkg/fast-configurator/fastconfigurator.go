@@ -12,11 +12,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -44,17 +43,51 @@ const (
 func Run(controllerManagerAddress string, mps bool) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
-	gpus := GetGPUs()
+	server, err := NewServer("5001")
+	if err != nil {
+		klog.Fatalf("Error failed to create gRPC server: %v", err)
+		return
+	}
+	klog.Infof("gRPC server started on port 5001")
+
+	defer server.Stop()
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Wait for signal
+	sig := <-sigChan
+	klog.Infof("Received signal %v, shutting down", sig)
+}
+
+func RunOld(controllerManagerAddress string, mps bool) {
+	klog.Infof("Starting FaST-GShare configurator...")
+
+	server, err := NewServer("5001")
+	if err != nil {
+		klog.Fatalf("Error failed to create gRPC server: %v", err)
+		return
+	}
+	klog.Infof("gRPC server started on port 5001")
+
+	defer server.Stop()
+
+	manager, err := NewResourceManager()
+
+	if err != nil {
+		klog.Fatalf("Error failed to initialize ResourceManager: %v", err)
+		return
+	}
+
 	//filter out non-usable GPUs, mig parents are not usable
-	gpus = FilterUsable(gpus)
-	if mps {
-		err := StartMPS(gpus)
-		if err != nil {
-			klog.Fatalf("Error failed to start MPS: %v", err)
-		}
+	gpus := manager.getAvailableVirtualResources()
 
-		defer StopMPS(gpus)
+	log.Printf("count of available GPUs: %d\n", len(manager.PhysicalGPUs))
 
+	if len(gpus) == 0 {
+		klog.Fatalf("No usable GPUs found.")
+		return
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -143,34 +176,50 @@ func writeMsgToConn(conn net.Conn, b []byte) error {
 	return nil
 }
 
-func registerGPUDevices(conn net.Conn, gpus []*GPU) {
+func registerGPUDevices(conn net.Conn, gpus []*VirtualGPU) {
 
 	gpu_num := len(gpus)
 	var buf bytes.Buffer
 
 	var gpuinfo types.GPURegisterMessage = types.GPURegisterMessage{
-		GPU: make([]types.GPU, gpu_num),
+		GPU: make([]types.VirtualGPU, gpu_num),
 	}
 
 	for i := 0; i < gpu_num; i++ {
 
-		uuid := gpus[i].UUID
-		memsize := gpus[i].Memory
-		oriGPUType := gpus[i].Name
-		gpuTypeName := strings.Split(oriGPUType, " ")[1]
+		// uuid := gpus[i].UUID
+		// memsize := gpus[i].Memory
+		// oriGPUType := gpus[i].Name
+		// gpuTypeName := strings.Split(oriGPUType, " ")[1]
 
-		uuidWithType := uuid + "_" + gpuTypeName
-		buf.WriteString(uuidWithType + ":")
-		buf.WriteString(strconv.FormatUint(memsize, 10))
-		buf.WriteString(",")
+		// uuidWithType := uuid + "_" + gpuTypeName
+		// buf.WriteString(uuidWithType + ":")
+		// buf.WriteString(strconv.FormatUint(memsize, 10))
+		// buf.WriteString(",")
 
-		gpu := types.GPU{
-			UUID:     uuid,
-			TypeName: gpuTypeName,
-			Memory:   memsize,
+		var provisionedGPU *types.GPU
+
+		if gpus[i].ProvisionedGPU != nil {
+			provisionedGPU = &types.GPU{
+				UUID:     gpus[i].ProvisionedGPU.UUID,
+				TypeName: gpus[i].ProvisionedGPU.Name,
+				Memory:   gpus[i].ProvisionedGPU.MemoryBytes,
+			}
+
+			gpu := types.VirtualGPU{
+				MemoryBytes:         gpus[i].MemoryBytes,
+				MultiProcessorCount: gpus[i].MultiProcessorCount,
+				IsProvisioned:       gpus[i].IsProvisioned,
+				InUse:               gpus[i].InUse,
+				ProvisionedGPU:      provisionedGPU,
+			}
+
+			gpuinfo.GPU[i] = gpu
 		}
-		gpuinfo.GPU[i] = gpu
+
 	}
+
+	klog.Infof("Registering %d GPU devices.", gpu_num)
 
 	b, err := types.EncodeToByte(gpuinfo)
 	if err != nil {

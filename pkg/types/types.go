@@ -18,6 +18,14 @@ type ConfiguratorNodeHelloMessage struct {
 	Hostname string
 }
 
+type VirtualGPU struct {
+	MemoryBytes         uint64
+	MultiProcessorCount int
+	IsProvisioned       bool
+	InUse               bool
+	ProvisionedGPU      *GPU
+}
+
 type GPU struct {
 	UUID     string
 	TypeName string
@@ -25,7 +33,7 @@ type GPU struct {
 }
 
 type GPURegisterMessage struct {
-	GPU []GPU
+	GPU []VirtualGPU
 }
 
 type PodGPURequest struct {

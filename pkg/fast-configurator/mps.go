@@ -6,44 +6,35 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
-func StartMPS(gpus []*GPU) error {
-	for _, gpu := range gpus {
-		if err := SetupMPSEnvironment(gpu); err != nil {
-			log.Printf("failed to set up MPS environment for %s: %v", gpu.UUID, err)
-			return err
-		}
-	}
-	return nil
+type MPSServer struct {
+	Device    *nvml.Device
+	UUID      string //device uuid
+	Name      string //device name
+	isEnabled bool
 }
 
-func StopMPS(gpus []*GPU) {
-	for _, gpu := range gpus {
-		if err := StopMPSDaemon(gpu); err != nil {
-			log.Printf("failed to stop MPS daemon for %s: %v", gpu.UUID, err)
-		}
-	}
-}
-
-// Set up directories and MPS daemon for a specific UUID
-func SetupMPSEnvironment(gpu *GPU) error {
-	if err := CreateDirectories(gpu.UUID); err != nil {
+// SetupMPSEnvironment sets up directories and MPS daemon for a specific UUID
+func (m *MPSServer) SetupMPSEnvironment() error {
+	if err := m.CreateDirectories(); err != nil {
 		return err
 	}
 
-	if err := StartMPSDaemon(gpu); err != nil {
+	if err := m.StartMPSDaemon(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// Create required directories for MPS
-func CreateDirectories(uuid string) error {
+// CreateDirectories creates required directories for MPS
+func (m *MPSServer) CreateDirectories() error {
 	dirs := []string{
-		fmt.Sprintf("/tmp/mps_%s", uuid),
-		fmt.Sprintf("/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("/tmp/mps_%s", m.UUID),
+		fmt.Sprintf("/tmp/mps_log_%s", m.UUID),
 	}
 
 	for _, dir := range dirs {
@@ -55,32 +46,36 @@ func CreateDirectories(uuid string) error {
 	return nil
 }
 
-// Build environment variables for MPS
-func BuildEnvironment(uuid string) []string {
+// BuildEnvironment builds environment variables for MPS
+func (m *MPSServer) BuildEnvironment() []string {
 	return []string{
-		fmt.Sprintf("CUDA_VISIBLE_DEVICES=%s", uuid),
-		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_%s", uuid),
-		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log_%s", uuid),
+		fmt.Sprintf("CUDA_VISIBLE_DEVICES=%s", m.UUID),
+		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_%s", m.UUID),
+		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log_%s", m.UUID),
 	}
 }
 
-// Start MPS daemon with specified environment
-func StartMPSDaemon(gpu *GPU) error {
-
-	env := BuildEnvironment(gpu.UUID)
+// StartMPSDaemon starts MPS daemon with specified environment
+func (m *MPSServer) StartMPSDaemon() error {
+	env := m.BuildEnvironment()
 	cmd := exec.Command("nvidia-cuda-mps-control", "-d")
 	cmd.Env = append(os.Environ(), env...)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start MPS daemon: %w", err)
 	}
-
-	log.Printf("MPS daemon started for gpu %s : %s with environment: %v", gpu.Name, gpu.UUID, env)
+	m.isEnabled = true
+	log.Printf("MPS daemon started for gpu %s : %s with environment: %v", m.Name, m.UUID, env)
 	return nil
 }
 
-func StopMPSDaemon(gpu *GPU) error {
-	env := BuildEnvironment(gpu.UUID)
+// StopMPSDaemon stops the MPS daemon for the specified GPU
+func (m *MPSServer) StopMPSDaemon(gpu *GPU) error {
+	if gpu == nil {
+		return fmt.Errorf("gpu is nil")
+	}
+
+	env := m.BuildEnvironment()
 
 	cmd := exec.Command("nvidia-cuda-mps-control")
 	cmd.Env = append(os.Environ(), env...)
@@ -108,8 +103,8 @@ func StopMPSDaemon(gpu *GPU) error {
 	return nil
 }
 
-// List processes containing "mps"
-func listMPSProcesses() error {
+// ListMPSProcesses lists processes containing "mps"
+func (m *MPSServer) ListMPSProcesses() error {
 	out, err := exec.Command("ps", "-ef").Output()
 	if err != nil {
 		return fmt.Errorf("ps command failed: %w", err)

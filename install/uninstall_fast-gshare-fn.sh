@@ -8,4 +8,4 @@ kubectl delete fastpods --all -n fast-gshare-fn
 helm uninstall fast-gshare --namespace fast-gshare
 kubectl delete pod -l fastgshare/role=dummyPod -n kube-system
 
-kubectl delete -f ${current_dir}/mps_daemon.yaml
+# kubectl delete -f ${current_dir}/mps_daemon.yaml

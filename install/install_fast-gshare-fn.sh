@@ -31,8 +31,8 @@ if [ -n "$existed_fastpods" ]; then
     bash ${project_dir}/yaml/fastgshare/clean_deploy_ctr_mgr_node_daemon.sh
 fi
 
-echo "creating mps daemon ....."
-kubectl apply -f ${current_dir}/mps_daemon.yaml
+# echo "creating mps daemon ....."
+# kubectl apply -f ${current_dir}/mps_daemon.yaml
 
 ## install FaST-GShare-Function
 kubectl apply -f ${project_dir}/namespace.yaml
@@ -46,5 +46,4 @@ fi
  
 helm install fast-gshare ./chart/fastgshare --namespace fast-gshare --set functionNamespace=fast-gshare-fn  \
 	--set  fastpodControllerManager.image="docker.io/kontonpuku666/fastpod-controller-manager:reconfig_test"
-
 

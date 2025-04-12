@@ -37,24 +37,28 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 				Value: boundDevUUID,
 			},
 			corev1.EnvVar{
+				Name:  "CUDA_VISIBLE_DEVICES",
+				Value: boundDevUUID,
+			},
+			corev1.EnvVar{
 				Name:  "NVIDIA_DRIVER_CAPABILITIES",
 				Value: "compute,utility",
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_PIPE_DIRECTORY",
-				Value: "/fastpod/mps/tmp",
+				Value: "/tmp/mps",
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_LOG_DIRECTORY",
-				Value: "/fastpod/mps/log",
+				Value: "/tmp/mps_log",
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
 				Value: smPartition,
 			},
 			// corev1.EnvVar{
-			// 	Name:  "LD_PRELOAD",
-			// 	Value: FaSTPodLibraryDir + "/libfast_new.so.1",
+			// 	Name: "LD_PRELOAD",
+			// 	// Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
 			// },
 			corev1.EnvVar{
 				// the scheduler IP is not necessary since the hooked containers get it from /fastpod/library/GPUClientsIP.txt
@@ -76,8 +80,12 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 				MountPath: FaSTPodLibraryDir,
 			},
 			corev1.VolumeMount{
-				Name:      "nvidia-mps",
-				MountPath: "/fastpod/mps",
+				Name:      "nvidia-mps-tmp",
+				MountPath: "/tmp/mps",
+			},
+			corev1.VolumeMount{
+				Name:      "nvidia-mps-tmp-log",
+				MountPath: "/tmp/mps_log",
 			},
 		)
 		ctn.ImagePullPolicy = fastpod.Spec.PodSpec.Containers[0].ImagePullPolicy
@@ -93,10 +101,18 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			},
 		},
 		corev1.Volume{
-			Name: "nvidia-mps",
+			Name: "nvidia-mps-tmp",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/fastpod/mps",
+					Path: "/tmp/mps_" + boundDevUUID,
+				},
+			},
+		},
+		corev1.Volume{
+			Name: "nvidia-mps-tmp-log",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/tmp/mps_log_" + boundDevUUID,
 				},
 			},
 		},

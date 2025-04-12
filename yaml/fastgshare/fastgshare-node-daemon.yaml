@@ -14,6 +14,7 @@ spec:
       labels:
         fastgsahre: configurator-scheduler-node-daemon
     spec:
+      hostIPC: true
       restartPolicy: Always
       terminationGracePeriodSeconds: 0
       tolerations:
