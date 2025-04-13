@@ -6,12 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
 type MPSServer struct {
-	Device    *nvml.Device
 	UUID      string //device uuid
 	Name      string //device name
 	isEnabled bool
@@ -116,4 +113,12 @@ func (m *MPSServer) ListMPSProcesses() error {
 		}
 	}
 	return nil
+}
+
+func NewMPSServer(name, uuid string) (*MPSServer, error) {
+
+	return &MPSServer{
+		UUID: uuid,
+		Name: name,
+	}, nil
 }

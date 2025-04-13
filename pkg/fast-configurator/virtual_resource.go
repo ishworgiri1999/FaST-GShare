@@ -12,19 +12,24 @@ import (
 // VirtualGPU represents a virtual GPU resource that exists logically
 // but is only physically created when accessed
 type VirtualGPU struct {
+	Name                string
 	ID                  string
-	DeviceIndex         int // Index of the physical GPU that this virtual GPU is created on
+	DeviceIndex         int // Index of the physical GPU that this virtual GPU can be created on
 	MemoryBytes         uint64
 	MultiProcessorCount int
 	IsProvisioned       bool
 	InUse               bool
-	profile             *nvml.GpuInstanceProfileInfo
+	Mig                 *MIGProperties
 	GPUInstance         *mig.GpuInstance
 	ComputeInstance     *mig.ComputeInstance
-	ProvisionedDevice   *nvml.Device
+	ProvisionedGPU      *GPU
+	mutex               sync.Mutex
+}
 
-	ProvisionedGPU *GPU
-	mutex          sync.Mutex
+type MIGProperties struct {
+	GPUInstance     *nvml.GpuInstance
+	ComputeInstance *nvml.ComputeInstance
+	profile         nvml.GpuInstanceProfileInfo
 }
 
 type GPU struct {
@@ -34,6 +39,8 @@ type GPU struct {
 	MultiProcessorCount int
 	ParentDeviceIndex   int
 	ParentUUID          string
+	ProvisionedDevice   nvml.Device
+	mpsServer           MPSServer
 }
 
 // ResourceManager manages virtual GPU resources
@@ -42,8 +49,10 @@ type ResourceManager struct {
 	nvml nvml.Interface
 
 	PhysicalGPUs []mig.Device
-	VirtualGPUs  []*VirtualGPU
+	VirtualGPUs  []*VirtualGPU //available ones
 	mutex        sync.Mutex
+
+	provisionedGPUs map[string]*VirtualGPU
 }
 
 // NewResourceManager initializes NVML and discovers available GPUs
@@ -53,8 +62,9 @@ func NewResourceManager() (*ResourceManager, error) {
 	}
 
 	rm := &ResourceManager{
-		mig:  mig.New(),
-		nvml: nvml.New(),
+		mig:             mig.New(),
+		nvml:            nvml.New(),
+		provisionedGPUs: make(map[string]*VirtualGPU),
 	}
 
 	// Discover physical GPUs
@@ -84,72 +94,62 @@ func NewResourceManager() (*ResourceManager, error) {
 func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 	var gpus []*VirtualGPU
 	for i, device := range rm.PhysicalGPUs {
+
+		name, ret := device.GetName()
+		if ret != nvml.SUCCESS {
+			log.Printf("Warning: Could not get name for GPU %d: %v", i, ret)
+			continue
+		}
+
+		//get device uuid, memory , multiprocessor count
+		uuid, ret := device.GetUUID()
+		if ret != nvml.SUCCESS {
+			log.Printf("Warning: Could not get UUID for GPU %d: %v", i, ret)
+			continue
+		}
+
+		memoo, ret := device.GetMemoryInfo()
+		if ret != nvml.SUCCESS {
+			log.Printf("Warning: Could not get memory info for GPU %d: %v", i, ret)
+			continue
+		}
+
 		// Check MIG capability
 		_, currentMode, ret := device.GetMigMode()
 
 		if ret == nvml.ERROR_NOT_SUPPORTED {
 			log.Printf("Warning: MIG not supported for GPU %d, skipping", i)
 
-			//get device uuid, memory , multiprocessor count
-			uuid, ret := device.GetUUID()
-			if ret != nvml.SUCCESS {
-				log.Printf("Warning: Could not get UUID for GPU %d: %v", i, ret)
-				continue
-			}
-			name, ret := device.GetName()
-			if ret != nvml.SUCCESS {
-				log.Printf("Warning: Could not get name for GPU %d: %v", i, ret)
-				continue
-			}
-			memoo, ret := device.GetMemoryInfo()
-			if ret != nvml.SUCCESS {
-				log.Printf("Warning: Could not get memory info for GPU %d: %v", i, ret)
-				continue
-			}
-			// Get SM count using the pci info
-			// pciInfo, ret := device.GetPciInfo()
-			// if ret != nvml.SUCCESS {
-			// 	log.Printf("Failed to get PCI info for device %d: %v", i, nvml.ErrorString(ret))
-			// 	continue
-			// }
+			smCount, _ := GetSMCount(name)
 
-			// // Get CUDA compute capability
-			// major, minor, ret := device.GetCudaComputeCapability()
-			// if ret != nvml.SUCCESS {
-			// 	log.Printf("Failed to get compute capability for device %d: %v", i, nvml.ErrorString(ret))
-			// 	continue
-			// }
-
-			// fmt.Printf("Device %d: %s (PCI: %s)\n", i, name, pciInfo.BusId)
-			// fmt.Printf("  Compute Capability: %d.%d\n", major, minor)
-
-			// // Get the raw value that contains SM count
-			// value, ret := device.GetFieldValue(nvml.NVML_FI_DEV_CUDA_COMPUTE_CAPABILITY)
-			// if ret != nvml.SUCCESS {
-			// 	log.Printf("Failed to get field value for device %d: %v", i, nvml.ErrorString(ret))
-			// 	continue
-			// }
-
-			// // The SM count is stored in bits 16-31 of this value
-			// smCount := (value >> 16) & 0xFFFF
-			// fmt.Printf("  SM Count: %d\n", smCount)
-
-			//get multiprocessor count
-			// mpc, ret := device.M()
-			// Create a virtual GPU for the physical GPU
-
+			isUsed := rm.provisionedGPUs[uuid].InUse
 			vGPU := &VirtualGPU{
 				ID:                  fmt.Sprintf("vgpu-%d", i),
 				DeviceIndex:         i,
 				MemoryBytes:         memoo.Total,
-				MultiProcessorCount: 0,
-				profile:             nil,
+				MultiProcessorCount: int(smCount),
+				Mig:                 nil,
 				IsProvisioned:       true,
-				ProvisionedDevice:   &device.Device,
-				ProvisionedGPU:      &GPU{UUID: uuid, Name: name, MemoryBytes: memoo.Total, MultiProcessorCount: 0},
+				Name:                name,
+				InUse:               isUsed,
+				ProvisionedGPU: &GPU{UUID: uuid,
+					Name:                name,
+					MemoryBytes:         memoo.Total,
+					MultiProcessorCount: int(smCount),
+					ParentDeviceIndex:   i,
+					ParentUUID:          uuid,
+					mpsServer: MPSServer{
+						UUID:      uuid,
+						Name:      name,
+						isEnabled: false,
+					},
+					ProvisionedDevice: device.Device,
+				},
 			}
-			gpus = append(gpus, vGPU)
 
+			rm.provisionedGPUs[uuid] = vGPU
+			gpus = append(gpus, vGPU)
+			continue
 		}
 
 		if ret != nvml.SUCCESS {
@@ -172,6 +172,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 		// Create virtual GPUs for each profile
 		for _, profile := range profiles {
 			count, ret := device.GetGpuInstanceRemainingCapacity(profile)
+
 			if ret != nvml.SUCCESS {
 				log.Printf("Error getting GPU instance remaining capacity for device %d: %v", i, err)
 				continue
@@ -179,12 +180,16 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 			for j := 0; j < count; j++ {
 				vGPU := &VirtualGPU{
+					Name: fmt.Sprintf("%s-mig-profile-%d", name, profile.Id),
+
 					ID:                  fmt.Sprintf("vgpu-%d-profile%d-%d", i, profile.Id, j),
 					DeviceIndex:         i,
 					MemoryBytes:         profile.MemorySizeMB * 1024 * 1024,
 					MultiProcessorCount: int(profile.MultiprocessorCount),
-					profile:             profile,
-					IsProvisioned:       false,
+					Mig: &MIGProperties{
+						profile: *profile,
+					},
+					IsProvisioned: false,
 				}
 				gpus = append(gpus, vGPU)
 			}
@@ -199,8 +204,19 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 	return gpus
 }
 
-// GetVirtualGPU returns a virtual GPU that meets the requirements
-func (rm *ResourceManager) GetVirtualGPU(requiredMemoryBytes uint64, requiredMultiProcessorCount int) (*VirtualGPU, error) {
+func (rm *ResourceManager) GetVirtualGPU(deviceUUID string) (*VirtualGPU, error) {
+	rm.mutex.Lock()
+	defer rm.mutex.Unlock()
+
+	vGPU, ok := rm.provisionedGPUs[deviceUUID]
+	if ok {
+		return vGPU, nil
+	}
+
+	return nil, fmt.Errorf("virtual GPU with uuid %s not found", deviceUUID)
+}
+
+func (rm *ResourceManager) FindVirtualGPU(profileID string) (*VirtualGPU, error) {
 	rm.mutex.Lock()
 	defer rm.mutex.Unlock()
 
@@ -209,14 +225,13 @@ func (rm *ResourceManager) GetVirtualGPU(requiredMemoryBytes uint64, requiredMul
 		if vGPU.IsProvisioned {
 			continue
 		}
-
 		// Check if this virtual GPU meets requirements
-		if vGPU.MemoryBytes >= requiredMemoryBytes && vGPU.MultiProcessorCount >= requiredMultiProcessorCount {
+		if vGPU.ID == profileID {
 			return vGPU, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no suitable virtual GPU available")
+	return nil, fmt.Errorf("virtual GPU with prolfile id %s not found", profileID)
 }
 
 // Access provisions the GPU instance and compute instance if not already done
@@ -225,7 +240,7 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	defer v.mutex.Unlock()
 
 	if v.IsProvisioned {
-		return nil // Already provisioned
+		return nil
 	}
 
 	// Get physical device handle
@@ -234,7 +249,7 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 		return fmt.Errorf("failed to get device handle for GPU %d: %v", v.DeviceIndex, ret)
 	}
 	// Create GPU instance
-	gpuInstance, ret := device.CreateGpuInstance(v.profile)
+	gpuInstance, ret := device.CreateGpuInstance(&v.Mig.profile)
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("failed to create GPU instance: %v", ret.String())
 	}
@@ -242,7 +257,7 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	v.GPUInstance = &instance
 
 	// Select profile that uses all SMs in the GPU instance
-	ciProfile, err := instance.GetFullUsageComputeInstanceProfile(v.profile)
+	ciProfile, err := instance.GetFullUsageComputeInstanceProfile(&v.Mig.profile)
 
 	if err != nil {
 		// Cleanup on failure
@@ -266,6 +281,59 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 
 	v.ComputeInstance = &ci
 	v.IsProvisioned = true
+
+	ciInfo, ret := computeInstance.GetInfo()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get compute instance info: %v", ret)
+	}
+
+	ciDevice := ciInfo.Device
+
+	//name
+	newDeviceName, ret := ciDevice.GetName()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get compute instance name: %v", ret)
+	}
+
+	//uuid
+	newDeviceUUID, ret := ciDevice.GetUUID()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get compute instance uuid: %v", ret)
+	}
+
+	parentUUID, ret := device.GetUUID()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get parent device uuid: %v", ret)
+	}
+	//memory
+	memoo, ret := ciDevice.GetMemoryInfo()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get compute instance memory info: %v", ret)
+	}
+
+	v.ProvisionedGPU = &GPU{
+		UUID:                newDeviceUUID,
+		Name:                newDeviceName,
+		MemoryBytes:         memoo.Total,
+		MultiProcessorCount: v.MultiProcessorCount,
+		ParentDeviceIndex:   v.DeviceIndex,
+		ParentUUID:          parentUUID,
+		ProvisionedDevice:   ciDevice,
+		mpsServer: MPSServer{
+			UUID: newDeviceUUID,
+			Name: newDeviceName,
+		},
+	}
 
 	return nil
 }
@@ -296,5 +364,8 @@ func (v *VirtualGPU) Release() error {
 	}
 
 	v.IsProvisioned = false
+	v.ProvisionedGPU = nil
+
+	v.InUse = false
 	return nil
 }
