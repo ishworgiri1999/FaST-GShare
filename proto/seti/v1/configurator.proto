@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package seti.v1;
+
+option go_package = "github.com/KontonGu/FaST-GShare/proto/seti/v1;seti";
+
+
+
+// Empty request for getting available GPUs
+message GetAvailableGPUsRequest {}
+
+// Response containing list of available GPUs
+message GetAvailableGPUsResponse {
+    repeated VirtualGPU gpus = 1;
+}
+
+// Message representing a virtual GPU
+message VirtualGPU {
+    string id = 1;
+    int32 device_index = 2;
+    uint64 memory_bytes = 3;
+    int32 multiprocessor_count = 4;
+    bool is_provisioned = 5;
+    bool in_use = 6;
+   optional GPU provisioned_gpu = 7;
+}
+
+// Message representing a physical GPU
+message GPU {
+    string uuid = 1;
+    string name = 2;
+    uint64 memory_bytes = 3;
+    int32 multiprocessor_count = 4;
+    int32 parent_device_index = 5;
+    string parent_uuid = 6;
+}
+
+// Request for a virtual GPU with specific requirements
+message RequestVirtualGPURequest {
+    uint64 required_memory_bytes = 1;
+    int32 required_multiprocessor_count = 2;
+}
+
+message RequestVirtualGPUResponse {
+    string id = 1;
+    int32 device_index = 2;
+    uint64 memory_bytes = 3;
+    int32 multiprocessor_count = 4;
+    bool is_provisioned = 5;
+    bool in_use = 6;
+    optional GPU provisioned_gpu = 7;
+}
+
+
+message GetHealthRequest {
+}
+
+message GetHealthResponse {
+    bool healthy = 2;
+    optional string message = 3;
+}
+
+
+message FastPodGPUConfig {
+    // PodName is the name of the pod namespace+name
+    string key = 1;
+    double qt_request = 2;
+    double qt_limit = 3;
+    int64 sm_partition = 4;
+    int64 memory = 5;
+    int32 gpu_client_port = 6;
+}
+
+message UpdateMPSConfigsRequest {
+  string device_uuid = 1;
+   repeated FastPodGPUConfig fastpod_gpu_configs = 2;
+}
+
+message UpdateMPSConfigsResponse {
+}
+
+message EnableMPSRequest {
+    string device_uuid = 1;
+}
+
+message EnableMPSResponse {
+    bool success = 1;
+    string message = 2;
+}
+message DisableMPSRequest {
+    string device_uuid = 1;
+}
+message DisableMPSResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Message for requesting to release a virtual GPU
+message ReleaseVirtualGPURequest {
+    string id = 1;
+}
+
+// Response for a virtual GPU release request
+message ReleaseVirtualGPUResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Service definition for GPU resource management
+service GPUConfiguratorService {
+    // Get available virtual GPUs
+    rpc GetAvailableGPUs (GetAvailableGPUsRequest) returns (GetAvailableGPUsResponse) {}
+    
+    // Request a virtual GPU with specific requirements
+    rpc RequestVirtualGPU (RequestVirtualGPURequest) returns (RequestVirtualGPUResponse) {}
+
+
+    rpc GetHealth (GetHealthRequest) returns (GetHealthResponse) {}
+
+
+    rpc ReleaseVirtualGPU (ReleaseVirtualGPURequest) returns (ReleaseVirtualGPUResponse) {}
+
+    rpc EnableMPS (EnableMPSRequest) returns (EnableMPSResponse) {}
+
+    rpc DisableMPS (DisableMPSRequest) returns (DisableMPSResponse) {}
+
+    // Update MPS configurations for a device
+    rpc UpdateMPSConfigs (UpdateMPSConfigsRequest) returns (UpdateMPSConfigsResponse) {}
+}

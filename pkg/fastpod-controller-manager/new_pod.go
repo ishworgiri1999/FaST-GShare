@@ -9,10 +9,32 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+type NewPodParams struct {
+	FaSTPod      *fastpodv1.FaSTPod
+	IsWarm       bool
+	BoundDevUUID string
+	SchedNode    string
+	SchedvGPUID  string
+	PodName      string
+	MPSConfig    *MPSConfig
+}
+
+type MPSConfig struct {
+	LogDirectory           string
+	PipeDirectory          string
+	ActiveThreadPercentage string
+	FastPodMPSConfig       *FastPodMPSConfig
+}
+
+type FastPodMPSConfig struct {
+	SchedulerIP   string
+	GpuClientPort int
+}
+
 // newPod create a new pod specification based on the given information for the FaSTPod
-func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP string, gpuClientPort int, boundDevUUID, schedNode, schedvGPUID, podName string) *corev1.Pod {
+func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) *corev1.Pod {
 	specCopy := fastpod.Spec.PodSpec.DeepCopy()
-	specCopy.NodeName = schedNode
+	specCopy.NodeName = params.SchedNode
 
 	labelCopy := makeLabels(fastpod)
 	annotationCopy := make(map[string]string, len(fastpod.ObjectMeta.Annotations)+5)
@@ -21,6 +43,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 	}
 
 	// TODO pre-warm setting for cold start issues, currently TODO...
+	isWarm := params.IsWarm
 	if isWarm {
 		annotationCopy[FastGShareWarm] = "true"
 	} else {
@@ -34,11 +57,11 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 		ctn.Env = append(ctn.Env,
 			corev1.EnvVar{
 				Name:  "NVIDIA_VISIBLE_DEVICES",
-				Value: boundDevUUID,
+				Value: params.BoundDevUUID,
 			},
 			corev1.EnvVar{
 				Name:  "CUDA_VISIBLE_DEVICES",
-				Value: boundDevUUID,
+				Value: params.BoundDevUUID,
 			},
 			corev1.EnvVar{
 				Name:  "NVIDIA_DRIVER_CAPABILITIES",
@@ -63,15 +86,15 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			corev1.EnvVar{
 				// the scheduler IP is not necessary since the hooked containers get it from /fastpod/library/GPUClientsIP.txt
 				Name:  "SCHEDULER_IP",
-				Value: schedIP,
+				Value: params.MPSConfig.FastPodMPSConfig.SchedulerIP,
 			},
 			corev1.EnvVar{
 				Name:  "GPU_CLIENT_PORT",
-				Value: fmt.Sprintf("%d", gpuClientPort),
+				Value: fmt.Sprintf("%d", params.MPSConfig.FastPodMPSConfig.GpuClientPort),
 			},
 			corev1.EnvVar{
 				Name:  "POD_NAME",
-				Value: fmt.Sprintf("%s/%s", fastpod.ObjectMeta.Namespace, podName),
+				Value: fmt.Sprintf("%s/%s", fastpod.ObjectMeta.Namespace, params.PodName),
 			},
 		)
 		ctn.VolumeMounts = append(ctn.VolumeMounts,
@@ -104,7 +127,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			Name: "nvidia-mps-tmp",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/tmp/mps_" + boundDevUUID,
+					Path: params.MPSConfig.PipeDirectory,
 				},
 			},
 		},
@@ -112,7 +135,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			Name: "nvidia-mps-tmp-log",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/tmp/mps_log_" + boundDevUUID,
+					Path: params.MPSConfig.LogDirectory,
 				},
 			},
 		},
@@ -120,11 +143,11 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaRequest] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaLimit] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
 	annotationCopy[fastpodv1.FaSTGShareGPUMemory] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
-	annotationCopy[fastpodv1.FaSTGShareVGPUID] = schedvGPUID
+	annotationCopy[fastpodv1.FaSTGShareVGPUID] = params.SchedvGPUID
 
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
+			Name:      params.PodName,
 			Namespace: fastpod.ObjectMeta.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(fastpod, schema.GroupVersionKind{
@@ -137,7 +160,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, isWarm bool, schedIP s
 			Labels:      labelCopy,
 		},
 		Spec: corev1.PodSpec{
-			NodeName:   schedNode,
+			NodeName:   params.SchedNode,
 			Containers: specCopy.Containers,
 			Volumes:    specCopy.Volumes,
 			HostIPC:    true,

@@ -19,8 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"path/filepath"
-
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"k8s.io/klog/v2"
 )
@@ -43,6 +41,13 @@ const (
 func Run(controllerManagerAddress string, mps bool) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
+	// err := initFiles()
+
+	// if err != nil {
+	// 	klog.Fatalf("Error failed to initialize files: %v", err)
+	// 	return
+	// }
+
 	server, err := NewServer("5001")
 	if err != nil {
 		klog.Fatalf("Error failed to create gRPC server: %v", err)
@@ -56,9 +61,183 @@ func Run(controllerManagerAddress string, mps bool) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Wait for signal
-	sig := <-sigChan
-	klog.Infof("Received signal %v, shutting down", sig)
+	// Channel to receive connection closed notifications
+	connClosedChan := make(chan struct{})
+
+	// Connection establishment function that can be called for both initial connection and reconnection
+	connectToController := func() (net.Conn, *bufio.Reader, error) {
+		klog.Infof("Trying to connect to controller-manager....., server IP:Port = %s\n", controllerManagerAddress)
+		retryCount := 0
+		var conn net.Conn
+		var err error
+
+		for retryCount < MaxConnRetries {
+			conn, err = net.Dial("tcp", controllerManagerAddress)
+			if err != nil {
+				klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .",
+					retryCount+1, MaxConnRetries, controllerManagerAddress, err)
+				klog.Errorf("Retrying in %d seconds...", RetryItv)
+				retryCount++
+				select {
+				case <-sigChan:
+					klog.Info("Received signal during connection attempt, aborting")
+					return nil, nil, err
+				case <-time.After(RetryItv * time.Second):
+					continue
+				}
+			}
+			break
+		}
+
+		if retryCount+1 >= MaxConnRetries {
+			return nil, nil, fmt.Errorf("maximum connection retries exceeded")
+		}
+
+		// Connection established
+		reader := bufio.NewReader(conn)
+		return conn, reader, nil
+	}
+
+	// Initial connection
+	conn, reader, err := connectToController()
+	if err != nil {
+		klog.Fatalf("Failed to establish initial connection: %v", err)
+		return
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		klog.Fatalf("Error Cannot get hostname. \n")
+		panic(err)
+	}
+
+	klog.Info("The connection to the device-controller-manager succeed.")
+
+	// Send hello message
+	helloMessage := types.ConfiguratorNodeHelloMessage{
+		Hostname: hostname,
+		GrpcPort: 5001,
+	}
+	klog.Infof("Sending hello message to the device-controller-manager with hostname: %s\n", hostname)
+	b, err := types.EncodeToByte(helloMessage)
+
+	klog.Infof("The encoded hello message: %v\n %d", b, len(b))
+	if err != nil {
+		klog.Fatalf("Error failed to encode ConfiguratorNodeHelloMessage: %v", err)
+	}
+
+	_, err = conn.Write(b)
+	if err != nil {
+		klog.Error("Error failed to write msg: %v", err)
+		conn.Close()
+		return
+	}
+
+	configMsg, err := reader.ReadBytes('\n')
+	if err != nil {
+		klog.Errorf("Error while Receiving Msg from fastpod-controller-manager: %v", err)
+		conn.Close()
+		return
+	}
+
+	var ack types.ConfiguratorNodeAckMessage
+	err = types.DecodeFromByte(configMsg, &ack)
+
+	if err != nil {
+		klog.Fatalf("Error failed to decode ConfiguratorNodeAckMessage: %v", err)
+		conn.Close()
+		return
+	}
+	if !ack.Ok {
+		klog.Fatalf("Error failed to receive ack message from device-controller-manager: %v", err)
+		conn.Close()
+		return
+	}
+
+	klog.Infof("Received ack message from device-controller-manager: %v", ack)
+
+	// Start heartbeat
+	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
+
+	// Start a goroutine to handle reconnection
+	go func() {
+		// Start the heartbeat goroutine and get the connection closed channel
+		heartbeatDone := make(chan struct{})
+		go func() {
+			sendNodeHeartbeats(conn, nodeHeartbeater.C, heartbeatDone)
+		}()
+
+		// Wait for either a signal or connection closure
+		select {
+		case <-sigChan:
+			klog.Info("Received shutdown signal, closing connection and exiting")
+			conn.Close()
+			return
+		case <-heartbeatDone:
+			klog.Warning("Connection to controller-manager lost, attempting to reconnect")
+
+			// Cleanup old connection and ticker
+			conn.Close()
+			nodeHeartbeater.Stop()
+
+			// Try to reconnect
+			reconnConn, reconnReader, reconnErr := connectToController()
+			if reconnErr != nil {
+				klog.Errorf("Failed to reconnect: %v", reconnErr)
+				close(connClosedChan) // Signal main goroutine to exit
+				return
+			}
+
+			klog.Info("Successfully reconnected to controller-manager")
+			conn = reconnConn
+			reader = reconnReader
+
+			// Send hello message again
+			_, err = conn.Write(b) // Reuse the hello message from before
+			if err != nil {
+				klog.Errorf("Failed to send hello message after reconnect: %v", err)
+				conn.Close()
+				close(connClosedChan)
+				return
+			}
+
+			// Wait for ack again
+			configMsg, err = reader.ReadBytes('\n')
+			if err != nil {
+				klog.Errorf("Error reading ack after reconnect: %v", err)
+				conn.Close()
+				close(connClosedChan)
+				return
+			}
+
+			err = types.DecodeFromByte(configMsg, &ack)
+			if err != nil || !ack.Ok {
+				klog.Errorf("Failed to receive valid ack after reconnect: %v", err)
+				conn.Close()
+				close(connClosedChan)
+				return
+			}
+
+			// Restart heartbeat
+			nodeHeartbeater = time.NewTicker(time.Second * time.Duration(HeartbeatItv))
+			go func() {
+				sendNodeHeartbeats(conn, nodeHeartbeater.C, heartbeatDone)
+			}()
+		}
+	}()
+
+	// Wait for either a shutdown signal or notification that the connection is permanently closed
+	select {
+	case <-sigChan:
+		klog.Infof("Received signal, shutting down")
+	case <-connClosedChan:
+		klog.Infof("Connection permanently closed, shutting down")
+	}
+
+	// Cleanup
+	if conn != nil {
+		conn.Close()
+	}
 }
 
 func RunOld(controllerManagerAddress string, mps bool) {
@@ -152,10 +331,8 @@ func RunOld(controllerManagerAddress string, mps bool) {
 	}
 	writeMsgToConn(conn, b)
 
-	registerGPUDevices(conn, gpus)
-
 	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
-	go sendNodeHeartbeats(conn, nodeHeartbeater.C)
+	go sendNodeHeartbeats(conn, nodeHeartbeater.C, nil)
 
 	go func() {
 		<-sigChan
@@ -230,7 +407,7 @@ func registerGPUDevices(conn net.Conn, gpus []*VirtualGPU) {
 
 }
 
-func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time) {
+func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time, connectionClosed chan struct{}) {
 	klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
 	heartbeat := types.ConfiguratorHeartbeatMessage{
 		Alive: true,
@@ -241,17 +418,46 @@ func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time) {
 		klog.Fatalf("Error failed to encode ConfiguratorHeartbeatMessage: %v", err)
 	}
 
+	// Send first heartbeat
 	err = writeMsgToConn(conn, beat)
 	if err != nil {
-		klog.Infof("Error failed to write heartbeat msg: %v", err)
+		klog.Errorf("Error failed to write initial heartbeat msg: %v", err)
+		if connectionClosed != nil {
+			close(connectionClosed)
+		}
+		return
 	}
 	klog.Info("First heartbeat sent to fastpod-controller-manager.")
+
+	// Counter for consecutive failures
+	consecutiveFailures := 0
+
+	// Maximum number of failures before giving up
+	const maxConsecutiveFailures = 3
+
 	for {
-		<-heartTick
-		klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
-		e := writeMsgToConn(conn, beat)
-		if e != nil {
-			klog.Infof("Error failed to write heartbeat msg: %v", e)
+		select {
+		case <-heartTick:
+			klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
+			e := writeMsgToConn(conn, beat)
+			if e != nil {
+				consecutiveFailures++
+				klog.Errorf("Error failed to write heartbeat msg (%d/%d failures): %v",
+					consecutiveFailures, maxConsecutiveFailures, e)
+
+				// Check if we should give up
+				if consecutiveFailures >= maxConsecutiveFailures {
+					klog.Errorf("Connection to controller-manager appears to be closed after %d failed attempts",
+						consecutiveFailures)
+					if connectionClosed != nil {
+						close(connectionClosed)
+					}
+					return
+				}
+			} else {
+				// Reset failure counter on successful send
+				consecutiveFailures = 0
+			}
 		}
 	}
 }
@@ -274,50 +480,4 @@ func recvMsgAndWriteConfig(reader *bufio.Reader) {
 
 		handleMsg(parsedConfig)
 	}
-}
-
-func handleMsg(parsedConfig types.UpdatePodsGPUConfigMessage) {
-	klog.Infof("Received message from fastpod-controller-manager: %v", parsedConfig)
-
-	uuid := parsedConfig.GpuUUID
-
-	klog.Infof("The gpu confiugration message, uuid=%s, data=%v\n", uuid, parsedConfig.PodGPURequests)
-	confPath := filepath.Join(FastSchedulerConfigDir, uuid)
-	confFile, err := os.Create(confPath)
-	if err != nil {
-
-		klog.Errorf("Error failed to create the fast scheduler resource configuration file: %s\n.", confPath)
-		klog.Errorf("Error :%v", err)
-	}
-
-	gcPortFilePath := filepath.Join(GPUClientsPortConfigDir, uuid)
-	gcPortFile, err := os.Create(gcPortFilePath)
-	if err != nil {
-		klog.Errorf("Error failed to create the gpu clients' port configuration file: %s\n.", gcPortFilePath)
-	}
-
-	confFile.WriteString(fmt.Sprintf("%d\n", len(parsedConfig.PodGPURequests)))
-
-	for _, podReq := range parsedConfig.PodGPURequests {
-		fastSchedConf := podGPUSchedulerConfigFromat(podReq)
-		confFile.WriteString(fastSchedConf)
-	}
-	confFile.Sync()
-	confFile.Close()
-	gcPortFile.WriteString(fmt.Sprintf("%d\n", len(parsedConfig.PodGPURequests)))
-	for _, podReq := range parsedConfig.PodGPURequests {
-		gpuClientsPort := PodGPUClientsPortConfigFormat(podReq)
-		gcPortFile.WriteString(gpuClientsPort)
-	}
-
-	gcPortFile.Sync()
-	gcPortFile.Close()
-}
-
-func podGPUSchedulerConfigFromat(podReq types.PodGPURequest) string {
-	return fmt.Sprintf("%s %f %f %d %d\n", podReq.Key, podReq.QtRequest, podReq.QtLimit, podReq.SMPartition, podReq.Memory)
-}
-
-func PodGPUClientsPortConfigFormat(podReq types.PodGPURequest) string {
-	return fmt.Sprintf("%s %d\n", podReq.Key, podReq.GPUClientPort)
 }

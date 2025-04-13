@@ -32,8 +32,8 @@ type GPU struct {
 	Name                string
 	MemoryBytes         uint64
 	MultiProcessorCount int
-	ParentDeviceIndex   *int
-	ParentUUID          *string
+	ParentDeviceIndex   int
+	ParentUUID          string
 }
 
 // ResourceManager manages virtual GPU resources

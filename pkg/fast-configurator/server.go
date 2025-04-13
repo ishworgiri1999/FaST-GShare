@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/KontonGu/FaST-GShare/proto/seti"
+	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 	"google.golang.org/grpc"
 )
 
@@ -13,7 +13,7 @@ type ConfigurationServerParams struct{}
 
 // ConfiguratorServer implements the GPU configurator service
 type ConfiguratorServer struct {
-	seti.UnimplementedGPUConfiguratorServer
+	seti.UnimplementedGPUConfiguratorServiceServer
 	manager *ResourceManager
 }
 
@@ -41,7 +41,7 @@ func NewServer(port string) (*Server, error) {
 		return nil, fmt.Errorf("failed to create configuration server: %w", err)
 	}
 	// Register the ConfiguratorServer with the gRPC server
-	seti.RegisterGPUConfiguratorServer(grpcServer, configServer)
+	seti.RegisterGPUConfiguratorServiceServer(grpcServer, configServer)
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {

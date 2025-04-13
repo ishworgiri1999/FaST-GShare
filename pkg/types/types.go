@@ -16,6 +16,11 @@ type ConfiguratorHeartbeatMessage struct {
 
 type ConfiguratorNodeHelloMessage struct {
 	Hostname string
+	GrpcPort int
+}
+
+type ConfiguratorNodeAckMessage struct {
+	Ok bool `json:"ok"`
 }
 
 type VirtualGPU struct {

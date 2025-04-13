@@ -601,7 +601,10 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// Create the new pod for the fastpod
 			if node, ok := nodesInfo[schedNode]; ok {
 				klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
-				newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), ctr.newPod(fastpod, false, node.DaemonIP, gpuClientPort, gpuDevUUID, schedNode, schedvGPUID, subpodName), metav1.CreateOptions{})
+
+
+				pod:= ctr.newPod(fastpod, false, node.DaemonIP, gpuClientPort, gpuDevUUID, schedNode, schedvGPUID, subpodName), 
+				newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(),pod,metav1.CreateOptions{})
 				if err != nil {
 					klog.Errorf("Error when creating pod=%s for the FaSTPod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name)
 					klog.Errorf("Error: %s", err)

@@ -84,6 +84,8 @@ var Quantity1 = resource.MustParse("1")
 const PortRange int = 1024
 
 func (ctr *Controller) gpuNodeInit() error {
+
+	return nil
 	var nodes []*corev1.Node
 	var err error
 
