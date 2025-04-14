@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KontonGu/FaST-GShare/pkg/types"
+	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -162,71 +162,48 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 		klog.Errorf(errMsg)
 		return fmt.Errorf(errMsg)
 	}
-	conn := nodeLive.ConfigConn
+
 	if nodeLive.Status != NodeReady {
 		errMsg := fmt.Sprintf("The node = %s is not ready.", nodeName)
 		klog.Errorf(errMsg)
 		return fmt.Errorf(errMsg)
 	}
-	// Write and Sned podlist's GPU resource configuration to the configurator
+	// Write and Send podlist's GPU resource configuration to the configurator
 
-	podGPUConfig := types.UpdatePodsGPUConfigMessage{
-		GpuUUID:        uuid,
-		PodGPURequests: make([]types.PodGPURequest, 0, podlist.Len()),
+	podGPUConfigRequest := seti.UpdateMPSConfigsRequest{
+		DeviceUuid:        uuid,
+		FastpodGpuConfigs: make([]*seti.FastPodGPUConfig, 0, podlist.Len()),
 	}
 
-	var buf bytes.Buffer
-	buf.WriteString(uuid)
-	buf.WriteString(":")
 	// write resource configuration
 	if podlist != nil {
 		for pod := podlist.Front(); pod != nil; pod = pod.Next() {
 			podRequest := pod.Value.(*PodReq)
-			podGPUConfig.PodGPURequests = append(podGPUConfig.PodGPURequests, types.PodGPURequest{
-				Key:           podRequest.Key,
-				QtRequest:     podRequest.QtRequest,
-				QtLimit:       podRequest.QtLimit,
-				SMPartition:   podRequest.SMPartition,
-				Memory:        podRequest.Memory,
-				GPUClientPort: podRequest.GPUClientPort,
+			podGPUConfigRequest.FastpodGpuConfigs = append(podGPUConfigRequest.FastpodGpuConfigs, &seti.FastPodGPUConfig{
+				Key:         podRequest.Key,
+				QtRequest:   podRequest.QtRequest,
+				QtLimit:     podRequest.QtLimit,
+				SmPartition: podRequest.SMPartition,
+				Memory:      podRequest.Memory,
 			})
-			//TODO: remove string message
-			buf.WriteString(pod.Value.(*PodReq).Key) // pod's namespace + name
-			buf.WriteString(" ")
-			buf.WriteString(fmt.Sprintf("%f", pod.Value.(*PodReq).QtRequest))
-			buf.WriteString(" ")
-			buf.WriteString(fmt.Sprintf("%f", pod.Value.(*PodReq).QtLimit))
-			buf.WriteString(" ")
-			buf.WriteString(fmt.Sprintf("%d", pod.Value.(*PodReq).SMPartition))
-			buf.WriteString(" ")
-			buf.WriteString(fmt.Sprintf("%d", pod.Value.(*PodReq).Memory))
-			buf.WriteString(",")
-
 		}
 	}
-	buf.WriteString(":")
-	// write gpu clients' ports
-	if podlist != nil {
-		for pod := podlist.Front(); pod != nil; pod = pod.Next() {
-			buf.WriteString(pod.Value.(*PodReq).Key) // pod's namespace + name
-			buf.WriteString(" ")
-			buf.WriteString(fmt.Sprintf("%d", pod.Value.(*PodReq).GPUClientPort))
-			buf.WriteString(",")
-		}
-	}
-	buf.WriteString("\n")
-
-	getByte, err := types.EncodeToByte(podGPUConfig)
-	if err != nil {
-		klog.Errorf("Error failed to encode UpdatePodsGPUConfigMessage: %v", err)
-		return err
-	}
-
-	klog.Infof("Update the gpu device = %s in the node = %s resource configuration with: %s", uuid, nodeName, buf.String())
-	if _, err := conn.Write(getByte); err != nil {
-		errMsg := fmt.Sprintf("Failed to write msg to node = %s with the GPU = %s reosurce configuration of pods, write msg = %s.", nodeName, uuid, buf.String())
+	client := nodesGRPCClient[nodeName]
+	if client == nil {
+		errMsg := fmt.Sprintf("The node = %s is not initialized.", nodeName)
 		klog.Errorf(errMsg)
 		return fmt.Errorf(errMsg)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// send the request to the configurator
+	_, err := client.UpdateMPSConfigs(ctx, &podGPUConfigRequest)
+	if err != nil {
+		klog.Errorf("Error while sending the pod gpu resource configuration to the configurator of node = %s, %s", nodeName, err.Error())
+		return err
+	}
+
+	klog.Infof("Update the gpu device = %s in the node = %s resource configuration with: %v", uuid, nodeName, podGPUConfigRequest)
+
 	return nil
 }

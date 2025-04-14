@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"k8s.io/klog/v2"
 )
@@ -64,6 +65,8 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 
 	client := NewGrpcClient()
 
+	nodesGRPCClient[helloMessage.Hostname] = client
+
 	err = client.Connect(nodeIP, helloMessage.GrpcPort)
 	if err != nil {
 		klog.Errorf("Error while connecting to the node configurator.")
@@ -77,12 +80,43 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		return err
 	}
 
-	gpus, err := client.GetAvailableGPUs(context.TODO())
+	response, err := client.GetAvailableGPUs(context.TODO())
 	if err != nil {
 		klog.Errorf("Error while getting the available GPUs from the node configurator.")
 	}
 
-	klog.Infof("Received available GPUs from node configurator: %v", gpus)
+	nodesInfoMtx.Lock()
+	if nodesInfo[helloMessage.Hostname] != nil {
+		klog.Info(nodesInfo[helloMessage.Hostname].vGPUID2GPU)
+	}
+	if node, has := nodesInfo[helloMessage.Hostname]; !has {
+		node = &NodeStatusInfo{
+			vGPUID2GPU:      make(map[string]*GPUDevInfo),
+			UUID2SchedPort:  make(map[string]string),
+			UUID2GPUType:    make(map[string]string),
+			DaemonIP:        nodeIP,
+			DaemonPortAlloc: bitmap.NewBitmap(PortRange),
+		}
+		nodesInfo[helloMessage.Hostname] = node
+	} else {
+		node.DaemonIP = nodeIP
+	}
+
+	if nodes[helloMessage.Hostname] != nil {
+		klog.Info(nodes[helloMessage.Hostname].vgpus)
+	}
+
+	if node, has := nodes[helloMessage.Hostname]; !has {
+
+		node = &Node{
+			vgpus: response.Gpus,
+		}
+		nodes[helloMessage.Hostname] = node
+	}
+
+	nodesInfoMtx.Unlock()
+
+	klog.Infof("Received available GPUs from node configurator: %v", helloMessage.Hostname)
 
 	defer client.Close()
 

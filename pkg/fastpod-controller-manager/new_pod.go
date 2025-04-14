@@ -22,7 +22,7 @@ type NewPodParams struct {
 type MPSConfig struct {
 	LogDirectory           string
 	PipeDirectory          string
-	ActiveThreadPercentage string
+	ActiveThreadPercentage int
 	FastPodMPSConfig       *FastPodMPSConfig
 }
 

@@ -118,11 +118,20 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 		_, currentMode, ret := device.GetMigMode()
 
 		if ret == nvml.ERROR_NOT_SUPPORTED {
-			log.Printf("Warning: MIG not supported for GPU %d, skipping", i)
+			log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
 
-			smCount, _ := GetSMCount(name)
+			smCount, err := GetSMCount(name)
+			if err != nil {
+				log.Printf("Warning: Could not get SM count for GPU %s: %v. Using default of 0.", name, err)
+				smCount = 0 // Default to a reasonable value for modern GPUs
+			}
 
-			isUsed := rm.provisionedGPUs[uuid].InUse
+			// Safely check if the GPU is already provisioned
+			var isUsed bool
+			if vGPU, exists := rm.provisionedGPUs[uuid]; exists && vGPU != nil {
+				isUsed = vGPU.InUse
+			}
+
 			vGPU := &VirtualGPU{
 				ID:                  fmt.Sprintf("vgpu-%d", i),
 				DeviceIndex:         i,
@@ -132,7 +141,8 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				IsProvisioned:       true,
 				Name:                name,
 				InUse:               isUsed,
-				ProvisionedGPU: &GPU{UUID: uuid,
+				ProvisionedGPU: &GPU{
+					UUID:                uuid,
 					Name:                name,
 					MemoryBytes:         memoo.Total,
 					MultiProcessorCount: int(smCount),
@@ -162,6 +172,111 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			continue
 		}
 
+		migCount, ret := device.GetMaxMigDeviceCount()
+		if ret != nvml.SUCCESS {
+			log.Printf("Warning: Could not get MIG device count for GPU %d: %v", i, ret)
+			continue
+		}
+
+		for j := 0; j < migCount; j++ {
+			migDevice, ret := device.GetMigDeviceHandleByIndex(j)
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get MIG device handle for GPU %d, index %d: %v", i, j, ret)
+				continue
+			}
+			migDeviceName, ret := migDevice.GetName()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get MIG device name for GPU %d, index %d: %v", i, j, ret)
+				continue
+			}
+			migDeviceUUID, ret := migDevice.GetUUID()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get MIG device UUID for GPU %d, index %d: %v", i, j, ret)
+				continue
+			}
+			migDeviceMemory, ret := migDevice.GetMemoryInfo()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get MIG device memory info for GPU %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			atters, ret := migDevice.GetAttributes()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get attributes for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			//get compute instance
+
+			computeInstanceID, ret := migDevice.GetComputeInstanceId()
+
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get compute instance ID for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			gpuInstanceID, ret := migDevice.GetGpuInstanceId()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get GPU instance ID for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+			gpuInstance, ret := device.GetGpuInstanceById(gpuInstanceID)
+
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get compute instance for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			info, ret := gpuInstance.GetInfo()
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get GPU instance info for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+			profile, ret := device.GetGpuInstanceProfileInfo(int(info.ProfileId))
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get GPU instance profile info for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			computeInstance, ret := gpuInstance.GetComputeInstanceById(computeInstanceID)
+			if ret != nvml.SUCCESS {
+				log.Printf("Warning: Could not get compute instance for MIG device %d, index %d: %v", i, j, ret)
+				continue
+			}
+
+			old, ok := rm.provisionedGPUs[migDeviceUUID]
+
+			vgpu := &VirtualGPU{
+				Name:                migDeviceName,
+				ID:                  fmt.Sprintf("vgpu-%d-mig-%d", i, j),
+				MultiProcessorCount: int(atters.MultiprocessorCount),
+				MemoryBytes:         migDeviceMemory.Total,
+				Mig: &MIGProperties{
+					GPUInstance:     &gpuInstance,
+					profile:         profile,
+					ComputeInstance: &computeInstance,
+				},
+				IsProvisioned: true,
+				DeviceIndex:   i,
+				ProvisionedGPU: &GPU{
+					UUID:                migDeviceUUID,
+					Name:                migDeviceName,
+					MemoryBytes:         migDeviceMemory.Total,
+					MultiProcessorCount: int(atters.MultiprocessorCount),
+					ParentDeviceIndex:   i,
+					ParentUUID:          uuid,
+					ProvisionedDevice:   migDevice,
+					mpsServer: MPSServer{
+						UUID:      migDeviceUUID,
+						Name:      migDeviceName,
+						isEnabled: ok && old.ProvisionedGPU.mpsServer.isEnabled,
+					},
+				},
+			}
+			gpus = append(gpus, vgpu)
+
+		}
+
 		// Get GPU profiles supported by this device
 		profiles, err := device.GetPossiblGPUInstanceeProfiles()
 		if err != nil {
@@ -172,16 +287,15 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 		// Create virtual GPUs for each profile
 		for _, profile := range profiles {
 			count, ret := device.GetGpuInstanceRemainingCapacity(profile)
-
 			if ret != nvml.SUCCESS {
-				log.Printf("Error getting GPU instance remaining capacity for device %d: %v", i, err)
+				log.Printf("Error getting GPU instance remaining capacity for profile %d on device %d: %v",
+					profile.Id, i, ret.String())
 				continue
 			}
 
 			for j := 0; j < count; j++ {
 				vGPU := &VirtualGPU{
-					Name: fmt.Sprintf("%s-mig-profile-%d", name, profile.Id),
-
+					Name:                fmt.Sprintf("%s-mig-profile-%d", name, profile.Id),
 					ID:                  fmt.Sprintf("vgpu-%d-profile%d-%d", i, profile.Id, j),
 					DeviceIndex:         i,
 					MemoryBytes:         profile.MemorySizeMB * 1024 * 1024,
@@ -192,11 +306,6 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 					IsProvisioned: false,
 				}
 				gpus = append(gpus, vGPU)
-			}
-			//get gpu instance if available
-			if ret != nvml.SUCCESS {
-				log.Printf("Error getting GPU instance for device %d: %v", i, err)
-				continue
 			}
 
 		}

@@ -20,7 +20,7 @@ func (g *GrpcClient) Connect(nodeIP string, nodePort int) error {
 	credentials := grpc.WithTransportCredentials(insecure.NewCredentials())
 
 	// Dial to the gRPC server using insecure connection (for simplicity)
-	conn, err := grpc.NewClient(fmt.Sprintf("%s:%d", nodeIP, nodePort), credentials) // Use secure connection in production
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", nodeIP, nodePort), credentials) // Use secure connection in production
 	if err != nil {
 		return fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
@@ -45,6 +45,56 @@ func (g *GrpcClient) GetAvailableGPUs(ctx context.Context) (*seti.GetAvailableGP
 	// Create a request and call the gRPC service
 	req := &seti.GetAvailableGPUsRequest{}
 	res, err := g.client.GetAvailableGPUs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (g *GrpcClient) EnableMPS(ctx context.Context, deviceUUID string) (*seti.EnableMPSResponse, error) {
+	// Create a request and call the gRPC service
+
+	req := &seti.EnableMPSRequest{
+		DeviceUuid: deviceUUID,
+	}
+	res, err := g.client.EnableMPS(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (g *GrpcClient) DisableMPS(ctx context.Context, deviceUUID string) (*seti.DisableMPSResponse, error) {
+	// Create a request and call the gRPC service
+	req := &seti.DisableMPSRequest{
+		DeviceUuid: deviceUUID,
+	}
+	res, err := g.client.DisableMPS(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (g *GrpcClient) RequestVirtualGPU(ctx context.Context, req *seti.RequestVirtualGPURequest) (*seti.RequestVirtualGPUResponse, error) {
+	// Call the gRPC service
+	res, err := g.client.RequestVirtualGPU(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+func (g *GrpcClient) ReleaseVirtualGPU(ctx context.Context, req *seti.ReleaseVirtualGPURequest) (*seti.ReleaseVirtualGPUResponse, error) {
+	// Call the gRPC service
+	res, err := g.client.ReleaseVirtualGPU(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+func (g *GrpcClient) UpdateMPSConfigs(ctx context.Context, req *seti.UpdateMPSConfigsRequest) (*seti.UpdateMPSConfigsResponse, error) {
+
+	res, err := g.client.UpdateMPSConfigs(ctx, req)
 	if err != nil {
 		return nil, err
 	}

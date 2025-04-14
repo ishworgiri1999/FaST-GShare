@@ -25,6 +25,7 @@ import (
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
+	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -45,9 +46,10 @@ type PodReq struct {
 }
 
 type GPUDevInfo struct {
-	GPUType string
-	UUID    string
-	Mem     int64
+	usageMode string // exclusive, fastpod,mps
+	GPUType   string
+	UUID      string
+	Mem       int64
 	// Usage of GPU resource, SM * QtRequest
 	Usage float64
 	// Usage of GPU Memory
@@ -70,7 +72,14 @@ type NodeStatusInfo struct {
 	DaemonPortAlloc *bitmap.Bitmap
 }
 
+type Node struct {
+	vgpus []*seti.VirtualGPU
+}
+
 var (
+	nodesGRPCClient map[string]*GrpcClient
+	nodes           map[string]*Node
+	gpusUseCases    map[string]string //mps, exclusive, fastpod
 	// record all fastpods and gpu information (allocation/available)
 	nodesInfo    map[string]*NodeStatusInfo = make(map[string]*NodeStatusInfo)
 	nodesInfoMtx sync.Mutex

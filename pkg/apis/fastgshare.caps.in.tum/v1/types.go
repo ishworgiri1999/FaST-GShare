@@ -31,6 +31,7 @@ const (
 	FaSTGShareGPUQuotaLimit    = "fastgshare/gpu_quota_limit"
 	FaSTGShareGPUSMPartition   = "fastgshare/gpu_sm_partition"
 	FaSTGShareGPUMemory        = "fastgshare/gpu_mem"
+	FastGshareMode             = "/fastgshare/mode" // fastpod, mps, exclusive
 	FaSTGShareVGPUID           = "fastgshare/vgpu_id"
 	FaSTGShareVGPUType         = "fastgshare/vgpu_type"
 	FaSTGShareGPUsINfo         = "fastgshare/gpu_info"

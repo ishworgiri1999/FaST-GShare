@@ -197,9 +197,9 @@ func (ctr *Controller) Run(stopCh <-chan struct{}, workers int) error {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
-	if err := ctr.gpuNodeInit(); err != nil {
-		return fmt.Errorf("Error failed to init the gpu nodes: %s", err)
-	}
+	// if err := ctr.gpuNodeInit(); err != nil {
+	// 	return fmt.Errorf("Error failed to init the gpu nodes: %s", err)
+	// }
 
 	pendingInsuranceTicker := time.NewTicker(5 * time.Second)
 	pendingInsuranceDone := make(chan bool)
@@ -508,6 +508,15 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 				if err != nil || gpuMem < 0 {
 					utilruntime.HandleError(fmt.Errorf("Error The FaSTPod = %s/%s has invalid memory value %d.", objNamesapce, objName, gpuMem))
 				}
+
+				var mode = "fastpod"
+				modeTMP := fastpod.ObjectMeta.Annotations[fastpodv1.FastGshareMode]
+
+				//check mode
+				if mode == "mps" || mode == "fastpod" || mode == "exclusive" {
+					mode = modeTMP
+				}
+
 				isValidFastpod = true
 			}
 
@@ -602,9 +611,25 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			if node, ok := nodesInfo[schedNode]; ok {
 				klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
 
+				pod := ctr.newPod(fastpod,
+					&NewPodParams{
+						PodName:      subpodName,
+						SchedNode:    schedNode,
+						SchedvGPUID:  schedvGPUID,
+						IsWarm:       false,
+						BoundDevUUID: gpuDevUUID,
+						MPSConfig: &MPSConfig{
+							LogDirectory:           "tmp_mps_log",
+							PipeDirectory:          "tmp_mps_pipe",
+							ActiveThreadPercentage: 40,
+							FastPodMPSConfig: &FastPodMPSConfig{
+								SchedulerIP:   node.DaemonIP,
+								GpuClientPort: gpuClientPort,
+							},
+						},
+					})
 
-				pod:= ctr.newPod(fastpod, false, node.DaemonIP, gpuClientPort, gpuDevUUID, schedNode, schedvGPUID, subpodName), 
-				newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(),pod,metav1.CreateOptions{})
+				newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 				if err != nil {
 					klog.Errorf("Error when creating pod=%s for the FaSTPod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name)
 					klog.Errorf("Error: %s", err)
