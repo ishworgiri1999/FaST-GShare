@@ -27,9 +27,9 @@ import (
 	"path/filepath"
 	"time"
 
+	fastpodcontrollermanager "github.com/KontonGu/FaST-GShare/internal/apps/fastpod-controller-manager"
 	clientset "github.com/KontonGu/FaST-GShare/pkg/client/clientset/versioned"
 	informers "github.com/KontonGu/FaST-GShare/pkg/client/informers/externalversions"
-	fastpodcontrollermanager "github.com/KontonGu/FaST-GShare/pkg/fastpod-controller-manager"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"

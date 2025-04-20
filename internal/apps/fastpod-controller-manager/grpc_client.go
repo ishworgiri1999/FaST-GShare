@@ -20,7 +20,7 @@ func (g *GrpcClient) Connect(nodeIP string, nodePort int) error {
 	credentials := grpc.WithTransportCredentials(insecure.NewCredentials())
 
 	// Dial to the gRPC server using insecure connection (for simplicity)
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", nodeIP, nodePort), credentials) // Use secure connection in production
+	conn, err := grpc.NewClient(fmt.Sprintf("%s:%d", nodeIP, nodePort), credentials) // Use secure connection in production
 	if err != nil {
 		return fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
@@ -29,6 +29,18 @@ func (g *GrpcClient) Connect(nodeIP string, nodePort int) error {
 	g.conn = conn
 	g.client = seti.NewGPUConfiguratorServiceClient(conn)
 	return nil
+}
+
+func (g *GrpcClient) Close() {
+	// Close the connection when done
+	if g.conn != nil {
+		g.conn.Close()
+	}
+}
+
+func NewGrpcClient() *GrpcClient {
+
+	return &GrpcClient{}
 }
 
 func (g *GrpcClient) Health(ctx context.Context) (*seti.GetHealthResponse, error) {
@@ -99,16 +111,4 @@ func (g *GrpcClient) UpdateMPSConfigs(ctx context.Context, req *seti.UpdateMPSCo
 		return nil, err
 	}
 	return res, nil
-}
-
-func (g *GrpcClient) Close() {
-	// Close the connection when done
-	if g.conn != nil {
-		g.conn.Close()
-	}
-}
-
-func NewGrpcClient() *GrpcClient {
-
-	return &GrpcClient{}
 }

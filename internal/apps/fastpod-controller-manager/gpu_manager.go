@@ -73,13 +73,13 @@ type NodeStatusInfo struct {
 }
 
 type Node struct {
-	vgpus []*seti.VirtualGPU
+	vgpus      []*seti.VirtualGPU
+	grpcClient *GrpcClient
 }
 
 var (
-	nodesGRPCClient map[string]*GrpcClient
-	nodes           map[string]*Node
-	gpusUseCases    map[string]string //mps, exclusive, fastpod
+	nodes        map[string]*Node
+	gpusUseCases map[string]string //mps, exclusive, fastpod
 	// record all fastpods and gpu information (allocation/available)
 	nodesInfo    map[string]*NodeStatusInfo = make(map[string]*NodeStatusInfo)
 	nodesInfoMtx sync.Mutex

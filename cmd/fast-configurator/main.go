@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 
-	fastconfigurator "github.com/KontonGu/FaST-GShare/pkg/fast-configurator"
+	fastconfigurator "github.com/KontonGu/FaST-GShare/internal/apps/fast-configurator"
 	klog "k8s.io/klog/v2"
 )
 

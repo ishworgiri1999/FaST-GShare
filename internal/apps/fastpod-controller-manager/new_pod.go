@@ -67,36 +67,49 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 				Name:  "NVIDIA_DRIVER_CAPABILITIES",
 				Value: "compute,utility",
 			},
-			corev1.EnvVar{
-				Name:  "CUDA_MPS_PIPE_DIRECTORY",
-				Value: "/tmp/mps",
-			},
-			corev1.EnvVar{
-				Name:  "CUDA_MPS_LOG_DIRECTORY",
-				Value: "/tmp/mps_log",
-			},
-			corev1.EnvVar{
-				Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
-				Value: smPartition,
-			},
-			// corev1.EnvVar{
-			// 	Name: "LD_PRELOAD",
-			// 	// Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
-			// },
-			corev1.EnvVar{
-				// the scheduler IP is not necessary since the hooked containers get it from /fastpod/library/GPUClientsIP.txt
-				Name:  "SCHEDULER_IP",
-				Value: params.MPSConfig.FastPodMPSConfig.SchedulerIP,
-			},
-			corev1.EnvVar{
-				Name:  "GPU_CLIENT_PORT",
-				Value: fmt.Sprintf("%d", params.MPSConfig.FastPodMPSConfig.GpuClientPort),
-			},
+		)
+
+		// Add MPS related env vars only if MPSConfig exists
+		if params.MPSConfig != nil {
+			ctn.Env = append(ctn.Env,
+				corev1.EnvVar{
+					Name:  "CUDA_MPS_PIPE_DIRECTORY",
+					Value: "/tmp/mps",
+				},
+				corev1.EnvVar{
+					Name:  "CUDA_MPS_LOG_DIRECTORY",
+					Value: "/tmp/mps_log",
+				},
+				corev1.EnvVar{
+					Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
+					Value: smPartition,
+				},
+			)
+			if params.MPSConfig.FastPodMPSConfig != nil {
+				ctn.Env = append(ctn.Env,
+					corev1.EnvVar{
+						// the scheduler IP is not necessary since the hooked containers get it from /fastpod/library/GPUClientsIP.txt
+						Name:  "SCHEDULER_IP",
+						Value: params.MPSConfig.FastPodMPSConfig.SchedulerIP,
+					},
+					corev1.EnvVar{
+						Name:  "GPU_CLIENT_PORT",
+						Value: fmt.Sprintf("%d", params.MPSConfig.FastPodMPSConfig.GpuClientPort),
+						// corev1.EnvVar{
+						// 	Name: "LD_PRELOAD",
+						// 	// Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
+						// },
+					})
+			}
+		}
+
+		ctn.Env = append(ctn.Env,
 			corev1.EnvVar{
 				Name:  "POD_NAME",
 				Value: fmt.Sprintf("%s/%s", fastpod.ObjectMeta.Namespace, params.PodName),
 			},
 		)
+
 		ctn.VolumeMounts = append(ctn.VolumeMounts,
 			corev1.VolumeMount{
 				Name:      "fastpod-lib",

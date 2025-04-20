@@ -188,7 +188,13 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 			})
 		}
 	}
-	client := nodesGRPCClient[nodeName]
+	node := nodes[nodeName]
+	if node == nil {
+		errMsg := fmt.Sprintf("The node = %s is not initialized.", nodeName)
+		klog.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	client := node.grpcClient
 	if client == nil {
 		errMsg := fmt.Sprintf("The node = %s is not initialized.", nodeName)
 		klog.Errorf(errMsg)

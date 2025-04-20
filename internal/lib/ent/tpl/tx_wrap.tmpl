@@ -1,0 +1,123 @@
+{{/* The line below tells Intellij/GoLand to enable the autocompletion based on the *gen.Graph type. */}}
+{{/* gotype: entgo.io/ent/entc/gen.Graph */}}
+
+{{ define "tx_wrap" }}
+
+{{/* Add the base header for the generated file */}}
+{{ $pkg := base $.Config.Package }}
+{{ template "header" $ }}
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+)
+
+func TxSerializableOptions() *sql.TxOptions {
+	return &sql.TxOptions{Isolation: sql.LevelSerializable}
+}
+
+// WithWithOptions ensures the given function is executed within a transaction. It does this by either
+// re-using an existing transaction, or creating a new transaction. If the given context
+// already has a transaction attached, it is re-used and provided to the function. Otherwise,
+// a new transaction is created and attached to the context.
+func TxWrapWithOptions[R any | *any](
+	ctx context.Context,
+	client *Client,
+	options *sql.TxOptions,
+	fn func(ctx context.Context, tx *Tx) (R, error),
+) (R, error) {
+	tx := TxFromContext(ctx)
+
+	// If there is no transaction attached to the context, create a new one.
+	if tx == nil {
+		return wrapTxWithOptions(ctx, client, options, fn)
+	}
+
+	if options != nil {
+		var r R
+		return r, fmt.Errorf("cannot create new transaction with options, transaction already exists")
+	}
+
+	// If there is a transaction attached to the context, use it.
+	return fn(ctx, tx)
+}
+
+func TxWrap[R any | *any](
+	ctx context.Context,
+	client *Client,
+	fn func(ctx context.Context, tx *Tx) (R, error),
+) (R, error) {
+	return TxWrapWithOptions(ctx, client, nil, fn)
+}
+
+func TxWrapError(
+	ctx context.Context,
+	client *Client,
+	fn func(ctx context.Context, tx *Tx) error,
+) error {
+	_, err := TxWrap(ctx, client, func(ctx context.Context, tx *Tx) (any, error) {
+		return nil, fn(ctx, tx)
+	})
+
+	return err
+}
+
+func TxWrapErrorWithOptions(
+	ctx context.Context,
+	client *Client,
+	options *sql.TxOptions,
+	fn func(ctx context.Context, tx *Tx) error,
+) error {
+	_, err := TxWrapWithOptions(ctx, client, options, func(ctx context.Context, tx *Tx) (any, error) {
+		return nil, fn(ctx, tx)
+	})
+
+	return err
+}
+
+// wrapTx creates a new transaction, attaches it to the context and
+// provides it to the given function. If the given function returns
+// an error, the transaction is automatically rolled back.
+//
+// The `client` is used to create the transaction.
+func wrapTxWithOptions[R any | *any](
+	ctx context.Context,
+	client *Client,
+	options *sql.TxOptions,
+	fn func(ctx context.Context, tx *Tx) (R, error),
+) (R, error) {
+	var r R
+
+	tx, err := client.BeginTx(ctx, options)
+
+	if err != nil {
+		return r, err
+	}
+
+	ctx = NewTxContext(ctx, tx)
+
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	r, err = fn(ctx, tx)
+
+	if err != nil {
+		if rerr := tx.Rollback(); rerr != nil {
+			err = fmt.Errorf("%w: rolling back transaction: %v", err, rerr)
+		}
+		return r, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return r, fmt.Errorf("committing transaction: %w", err)
+	}
+
+	return r, nil
+}
+
+{{ end }}

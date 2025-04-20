@@ -22,10 +22,36 @@ import (
 	"strings"
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
+	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
 )
+
+// FindBestNode finds the best node for scheduling a FaSTPod
+// doesn't create resources
+
+type FastPodRequirements struct {
+	QuotaReq    float64
+	QuotaLimit  float64
+	SMPartition int64
+}
+
+type FindBestNodeParams struct {
+	AllocationType types.AllocationType
+
+	RequestedNode    *string
+	RequestGPUUUID   *string
+	RequestedGPUType *string
+	//For mig
+	SMRequest *int
+	Memory    int64
+}
+
+func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod) (*Node, error) {
+
+	return nil, nil
+}
 
 func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, quotaLimit float64, smPartition int64, gpuMem int64, isValid bool, key string) (string, string) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())

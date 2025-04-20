@@ -34,7 +34,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		return err
 	}
 	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
-	// daemonPodName := helloMessage.Hostname
+	// daemonPodName := hostName
 	// daemonPod, err := kubeClient.CoreV1().Pods("kube-system").Get(context.TODO(), daemonPodName, metav1.GetOptions{})
 	// if err != nil {
 	// 	klog.Errorf("Error cannot find the node daemonset.")
@@ -63,9 +63,9 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 
 	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
 
-	client := NewGrpcClient()
+	hostName := helloMessage.Hostname
 
-	nodesGRPCClient[helloMessage.Hostname] = client
+	client := NewGrpcClient()
 
 	err = client.Connect(nodeIP, helloMessage.GrpcPort)
 	if err != nil {
@@ -80,16 +80,21 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		return err
 	}
 
+	// after succful conn. save the connection to the node configurator
+	nodes[hostName] = &Node{
+		grpcClient: client,
+	}
+
 	response, err := client.GetAvailableGPUs(context.TODO())
 	if err != nil {
 		klog.Errorf("Error while getting the available GPUs from the node configurator.")
 	}
 
 	nodesInfoMtx.Lock()
-	if nodesInfo[helloMessage.Hostname] != nil {
-		klog.Info(nodesInfo[helloMessage.Hostname].vGPUID2GPU)
+	if nodesInfo[hostName] != nil {
+		klog.Info(nodesInfo[hostName].vGPUID2GPU)
 	}
-	if node, has := nodesInfo[helloMessage.Hostname]; !has {
+	if node, has := nodesInfo[hostName]; !has {
 		node = &NodeStatusInfo{
 			vGPUID2GPU:      make(map[string]*GPUDevInfo),
 			UUID2SchedPort:  make(map[string]string),
@@ -97,32 +102,32 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 			DaemonIP:        nodeIP,
 			DaemonPortAlloc: bitmap.NewBitmap(PortRange),
 		}
-		nodesInfo[helloMessage.Hostname] = node
+		nodesInfo[hostName] = node
 	} else {
 		node.DaemonIP = nodeIP
 	}
 
-	if nodes[helloMessage.Hostname] != nil {
-		klog.Info(nodes[helloMessage.Hostname].vgpus)
+	if nodes[hostName] != nil {
+		klog.Info(nodes[hostName].vgpus)
 	}
 
-	if node, has := nodes[helloMessage.Hostname]; !has {
+	if node, has := nodes[hostName]; !has {
 
 		node = &Node{
 			vgpus: response.Gpus,
 		}
-		nodes[helloMessage.Hostname] = node
+		nodes[hostName] = node
 	}
 
 	nodesInfoMtx.Unlock()
 
-	klog.Infof("Received available GPUs from node configurator: %v", helloMessage.Hostname)
+	klog.Infof("Received available GPUs from node configurator: %v", hostName)
 
 	defer client.Close()
 
 	klog.Infof("Received health check response from node configurator: %v", health)
 
-	// nodeName := helloMessage.Hostname
+	// nodeName := hostName
 
 	// var gpuInfoMsg types.GPURegisterMessage
 
@@ -229,7 +234,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	// }
 	// nodesInfoMtx.Unlock()
 
-	nodeName := helloMessage.Hostname
+	nodeName := hostName
 	// Initialize node liveness
 	nodesLivenessMtx.Lock()
 	if _, has := nodesLiveness[nodeName]; !has {
