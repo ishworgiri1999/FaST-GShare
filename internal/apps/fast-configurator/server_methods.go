@@ -112,8 +112,6 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 		DeviceIndex:         int32(vgpu.DeviceIndex),
 		MemoryBytes:         vgpu.MemoryBytes,
 		MultiprocessorCount: int32(vgpu.MultiProcessorCount),
-		IsProvisioned:       vgpu.IsProvisioned,
-		InUse:               vgpu.InUse,
 	}
 
 	// Add provisioned GPU info if available

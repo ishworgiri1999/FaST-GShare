@@ -15,6 +15,7 @@ func Example_test() {
 	if err != nil {
 		log.Fatalf("failed opening connection to sqlite: %v", err)
 	}
+
 	defer client.Close()
 	ctx := context.Background()
 	// Run the automatic migration tool to create all schema resources.

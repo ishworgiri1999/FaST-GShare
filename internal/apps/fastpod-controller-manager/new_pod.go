@@ -2,8 +2,10 @@ package fastpodcontrollermanager
 
 import (
 	"fmt"
+	"strconv"
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
+	"github.com/KontonGu/FaST-GShare/pkg/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -180,4 +182,99 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 			//InitContainers: []corev1.Container{},
 		},
 	}
+}
+
+func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) {
+	resourceRequest := &ResourceRequest{}
+	var fastPodRequirements *FastPodRequirements
+
+	quota := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]
+	quotaLimit := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
+	gpuMemory := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
+	allocationType := fastpod.ObjectMeta.Annotations[fastpodv1.FastGshareAllocationType]
+	smPartition := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUSMPartition]
+	smValue := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUSMValue]
+
+	node := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareNodeName]
+	vgpuType := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUType]
+	vgpuUUID := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]
+
+	allocationTypeValue := types.AllocationType(allocationType)
+
+	gpuMemoryValue, err := strconv.ParseInt(gpuMemory, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse GPU memory: %v", err)
+	}
+
+	resourceRequest.Memory = gpuMemoryValue
+	resourceRequest.AllocationType = allocationTypeValue
+
+	if len((node)) > 0 {
+		resourceRequest.RequestedNode = &node
+	}
+	if len((vgpuType)) > 0 {
+		resourceRequest.RequestedGPUType = &vgpuType
+	}
+	if len((vgpuUUID)) > 0 {
+		resourceRequest.RequestGPUUUID = &vgpuUUID
+	}
+
+	if allocationTypeValue == types.AllocationTypeFastPod {
+		quotaValue, err := strconv.ParseFloat(quota, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse GPU quota request: %v", err)
+		}
+		quotaLimitValue, err := strconv.ParseFloat(quotaLimit, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse GPU quota limit: %v", err)
+		}
+
+		smPartitionValue, err := strconv.Atoi(smPartition)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SM partition: %v", err)
+		}
+
+		fastPodRequirements = &FastPodRequirements{
+			QuotaReq:    quotaValue,
+			QuotaLimit:  quotaLimitValue,
+			SMPartition: int(smPartitionValue),
+		}
+
+		resourceRequest.FastPodRequirements = fastPodRequirements
+
+	}
+
+	if allocationTypeValue == types.AllocationTypeMIG {
+		smValueInt, err := strconv.Atoi(smValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SM value: %v", err)
+		}
+		resourceRequest.SMRequest = &smValueInt
+	}
+
+	return resourceRequest, nil
+}
+
+func validatePodRequest(request *ResourceRequest) (bool, error) {
+
+	if request.FastPodRequirements != nil {
+		if request.FastPodRequirements.QuotaLimit > 1.0 || request.FastPodRequirements.QuotaLimit < 0.0 {
+			return false, fmt.Errorf("invalid quota limitation value: %f", request.FastPodRequirements.QuotaLimit)
+		}
+
+		if request.FastPodRequirements.QuotaReq > 1.0 || request.FastPodRequirements.QuotaReq < 0.0 {
+			return false, fmt.Errorf("invalid quota request value: %f", request.FastPodRequirements.QuotaReq)
+		}
+
+		if request.FastPodRequirements.SMPartition < 0 || request.FastPodRequirements.SMPartition > 100 {
+			return false, fmt.Errorf("invalid SM partition value: %d", request.FastPodRequirements.SMPartition)
+		}
+	}
+
+	if request.Memory < 0 {
+		return false, fmt.Errorf("invalid memory value: %d", request.Memory)
+	}
+
+	return true, nil
 }

@@ -6,7 +6,7 @@ const (
 	AllocationTypeMPS     AllocationType = "MPS"
 	AllocationTypeFastPod AllocationType = "FastPod"
 	AllocationTypeMIG     AllocationType = "MIG"
-	AllocationTypeUnknown AllocationType = "Unknown"
+	AllocationTypeNone    AllocationType = "None"
 )
 
 func GetAllocationType(allocationType string) AllocationType {
@@ -18,7 +18,7 @@ func GetAllocationType(allocationType string) AllocationType {
 	case "MIG":
 		return AllocationTypeMIG
 	default:
-		return AllocationTypeUnknown
+		return AllocationTypeNone
 	}
 }
 

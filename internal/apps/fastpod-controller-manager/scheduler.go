@@ -23,6 +23,7 @@ import (
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
+	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
@@ -34,10 +35,10 @@ import (
 type FastPodRequirements struct {
 	QuotaReq    float64
 	QuotaLimit  float64
-	SMPartition int64
+	SMPartition int //0-100
 }
 
-type FindBestNodeParams struct {
+type ResourceRequest struct {
 	AllocationType types.AllocationType
 
 	RequestedNode    *string
@@ -46,11 +47,14 @@ type FindBestNodeParams struct {
 	//For mig
 	SMRequest *int
 	Memory    int64
+
+	//for mps
+	FastPodRequirements *FastPodRequirements
 }
 
-func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod) (*Node, error) {
+func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
 
-	return nil, nil
+	return nil, nil, nil
 }
 
 func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, quotaLimit float64, smPartition int64, gpuMem int64, isValid bool, key string) (string, string) {
@@ -74,7 +78,7 @@ func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, qu
 		//curently tmmporary use
 		klog.Infof("Prefered GPU: %s", prefereredGPU)
 
-		node := nodesInfo[schedNode]
+		node := nodes[schedNode]
 
 		log.Printf("node %s has %d GPUs", schedNode, len(node.vGPUID2GPU))
 		for key, g := range node.vGPUID2GPU {

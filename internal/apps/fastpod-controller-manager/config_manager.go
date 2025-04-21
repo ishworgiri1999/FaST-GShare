@@ -183,7 +183,7 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 				Key:         podRequest.Key,
 				QtRequest:   podRequest.QtRequest,
 				QtLimit:     podRequest.QtLimit,
-				SmPartition: podRequest.SMPartition,
+				SmPartition: int64(podRequest.SMPartition),
 				Memory:      podRequest.Memory,
 			})
 		}

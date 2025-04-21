@@ -26,11 +26,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KontonGu/FaST-GShare/internal/db/ent"
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	clientset "github.com/KontonGu/FaST-GShare/pkg/client/clientset/versioned"
 	fastpodscheme "github.com/KontonGu/FaST-GShare/pkg/client/clientset/versioned/scheme"
 	informers "github.com/KontonGu/FaST-GShare/pkg/client/informers/externalversions/fastgshare.caps.in.tum/v1"
 	listers "github.com/KontonGu/FaST-GShare/pkg/client/listers/fastgshare.caps.in.tum/v1"
+	"github.com/KontonGu/FaST-GShare/pkg/types"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -87,6 +89,8 @@ type Controller struct {
 	recorder record.EventRecorder
 
 	// containerdClient *containerd.Client
+
+	db *ent.Client
 }
 
 // NewController returns a new FaSTPod controller
@@ -95,7 +99,9 @@ func NewController(
 	fastpodclient clientset.Interface,
 	nodeinformer coreinformers.NodeInformer,
 	podinformer coreinformers.PodInformer,
-	fastpodinformer informers.FaSTPodInformer) *Controller {
+	fastpodinformer informers.FaSTPodInformer,
+	dbClient *ent.Client,
+) *Controller {
 
 	// Create event broadcaster
 	// Add fastpod-controller types to the default Kubernetes Scheme so Events can be
@@ -129,6 +135,8 @@ func NewController(
 
 		workqueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "FaSTPods"),
 		recorder:  recorder,
+
+		db: dbClient,
 	}
 
 	klog.Info("Setting up event handlers")
@@ -466,189 +474,123 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 		ctr.expectations.ExpectCreations(fstpKey, diff)
 		klog.Infof("Not enough replicas for the FaSTPod ..., spec need %d replicas, try to create %d replicas", *fastpodCopy.Spec.Replicas, diff)
 		successedNum, err := slowStartbatch(diff, k8scontroller.SlowStartInitialBatchSize, func() (*corev1.Pod, error) {
-			isValidFastpod := false
-			quotaReq := 0.0
-			quotaLimit := 0.0
-			smPartition := int64(100)
-			gpuMem := int64(0)
 
-			gpuDevUUID := ""
-			gpuClientPort := 0
-			// check the validity of fastpod resource configuration and get the resource configuration for a pod of FaSTPod
-			if fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest] != "" ||
-				fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit] != "" ||
-				fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUSMPartition] != "" {
-				var err error
-				objName := fastpod.ObjectMeta.Name
-				objNamesapce := fastpod.ObjectMeta.Namespace
-				tmpQLStr := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
-				quotaLimit, err = strconv.ParseFloat(tmpQLStr, 64)
-				if err != nil || quotaLimit > 1.0 || quotaLimit < 0.0 {
-					utilruntime.HandleError(fmt.Errorf("Error The FaSTPod = %s/%s has invalid quota limitation value %s.", objNamesapce, objName, tmpQLStr))
-					return nil, err
-				}
-
-				tmpQRStr := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]
-				quotaReq, err = strconv.ParseFloat(tmpQRStr, 64)
-				if err != nil || quotaReq > 1.0 || quotaReq < 0.0 {
-					utilruntime.HandleError(fmt.Errorf("Error The FaSTPod = %s/%s has invalid quota request value %f.", objNamesapce, objName, quotaReq))
-					return nil, err
-				}
-
-				tmpSMPaStr := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUSMPartition]
-				smPartition, err = strconv.ParseInt(tmpSMPaStr, 10, 64)
-				if err != nil || smPartition < 0 || smPartition > 100 {
-					utilruntime.HandleError(fmt.Errorf("Error The FaSTPod = %s/%s has invalid SM partition value %s.", objNamesapce, objName, tmpSMPaStr))
-					smPartition = int64(100)
-					return nil, err
-				}
-
-				tmpMemStr := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
-				gpuMem, err = strconv.ParseInt(tmpMemStr, 10, 64)
-				if err != nil || gpuMem < 0 {
-					utilruntime.HandleError(fmt.Errorf("Error The FaSTPod = %s/%s has invalid memory value %d.", objNamesapce, objName, gpuMem))
-				}
-
-				var mode = "fastpod"
-				modeTMP := fastpod.ObjectMeta.Annotations[fastpodv1.FastGshareMode]
-
-				//check mode
-				if mode == "mps" || mode == "fastpod" || mode == "exclusive" {
-					mode = modeTMP
-				}
-
-				isValidFastpod = true
+			request, err := getPodRequestFromPod(fastpod)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get pod request from fastpod: %v", err)
 			}
 
-			// If the FaSTPod set the schedule node and schedule vGPUID in the annotation
-			var schedNode, schedvGPUID string
-			nodeNameTmp, nodeOk := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareNodeName]
-			vGPUIDTmp, vgpuOK := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]
-			// check if the vGPUIDTmp is in the node nodeNameTmp if GPU scheduling asigned in the annotation
-			assignedvGPUValid := false
-			if nodeOk && vgpuOK {
-				if nodeinfo, nodeExisted := nodesInfo[nodeNameTmp]; nodeExisted {
-					if _, vgpuExisted := nodeinfo.vGPUID2GPU[vGPUIDTmp]; vgpuExisted {
-						assignedvGPUValid = true
-					}
-				}
-			}
-			// klog.Infof("KONTON_TEST: The status of assigned node and vGPU: nodeOk = %v, vgpuOK = %v, assignedvGPUValid = %v.", nodeOk, vgpuOK, assignedvGPUValid)
-			if nodeOk && vgpuOK && assignedvGPUValid {
-				schedNode = nodeNameTmp
-				schedvGPUID = vGPUIDTmp
-				klog.Infof("The pod of FaSTPod = %s is scheduled [Assigned] to the node = %s with vGPUID = %s", key, schedNode, schedvGPUID)
-			} else {
-				schedNode, schedvGPUID = ctr.schedule(fastpod, quotaReq, quotaLimit, smPartition, gpuMem, isValidFastpod, key)
-				if schedNode == "" {
-					return nil, errors.New("NoSchedNodeAvailable")
-				}
-				klog.Infof("The pod of FaSTPod = %s is scheduled [Automatical] to the node = %s with vGPUID = %s", key, schedNode, schedvGPUID)
+			ok, err := validatePodRequest(request)
+			if err != nil || !ok {
+				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Invalid pod request")
+				//we dont care if the pod is invalid
+				return nil, nil
 			}
 
-			// // get the node and gpu id (vGPU ID) the pod should be scheduled to based on the scheduling algorithm (Pure scheduling algorithm without assingment)
-			// var schedNode, schedvGPUID string
-			// schedNode, schedvGPUID = ctr.schedule(fastpod, quotaReq, quotaLimit, smPartition, gpuMem, isValidFastpod, key)
-			// if schedNode == "" {
-			// 	return nil, errors.New("NoSchedNodeAvailable")
-			// }
-			// klog.Infof("The pod of FaSTPod = %s is scheduled to the node = %s with vGPUID = %s", key, schedNode, schedvGPUID)
+			if request.AllocationType == types.AllocationTypeNone {
+				klog.Info("AllocationType is None, skip the pod creation.")
+				return nil, nil
+			}
+
+			selectedNode, selectedGPU, err := ctr.FindBestNode(fastpod, request)
+			if selectedNode == nil || selectedGPU == nil || err != nil {
+				klog.Infof("Error cannot find the best node for the fastpod %s.", key)
+				return nil, errors.New("NoSchedNodeAvailable")
+			}
+
+			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectedNode.hostName, selectedGPU.Id)
 
 			// generate the pod key for the new pod of FaSTPod
 			var subpodName string
-			var subpodKey string
-			if isValidFastpod {
-				var errCode int
-				fstpName := fastpodCopy.ObjectMeta.Name
-				if fstp2Pods[fstpName] == nil {
-					fstp2Pods[fstpName] = list.New()
-				}
-				newPodName := fstpName + "-" + RandStr(5)
-				subpodName = newPodName
-				subpodKey = fmt.Sprintf("%s/%s", fastpodCopy.ObjectMeta.Namespace, subpodName)
-				// get the gpu device uuid and update the pod resource configuration in configurator
-				gpuDevUUID, errCode = ctr.getGPUDevUUIDAndUpdateConfig(schedNode, schedvGPUID, quotaReq, quotaLimit, smPartition, gpuMem, subpodKey, &gpuClientPort)
-				klog.Infof("The pod = %s of FaSTPod %s with vGPUID = %s is bound to device UUID=%s with GPUClientPort=%d.", subpodKey, key, schedvGPUID, gpuDevUUID, gpuClientPort)
+			var errCode int
+			fstpName := fastpodCopy.ObjectMeta.Name
+			if fstp2Pods[fstpName] == nil {
+				fstp2Pods[fstpName] = list.New()
+			}
+			newPodName := fstpName + "-" + RandStr(5)
+			subpodName = newPodName
+			podKey := fmt.Sprintf("%s/%s", fastpodCopy.ObjectMeta.Namespace, subpodName)
 
-				// errCode 0: no error
-				// errCode 1: node with nodeName is not initialized
-				// errCode 2: vGPUID is not initialized or no DummyPod created;
-				// errCode 3: resource exceed;
-				// errCode 4: GPU is out of memory
-				// errCode 5: No enough gpu client ports
-				switch errCode {
-				case 0:
-					klog.Infof("The pod is successfully bound.")
-					fstp2Pods[fstpName].PushBack(newPodName)
-				case 1:
-					return nil, errors.New("NodeNotInitialized")
-				case 2:
-					return nil, errors.New("Waiting4Dummy")
-				case 3:
-					err := fmt.Errorf("Compute Resource exceed!")
-					utilruntime.HandleError(err)
-					ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Compute Resource exceed")
-					return nil, err
-				case 4:
-					err := fmt.Errorf("Out of memory!")
-					utilruntime.HandleError(err)
-					ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Out of memory")
-					return nil, err
-				case 5:
-					err := fmt.Errorf("GPU Clients Port is full!")
-					utilruntime.HandleError(err)
-					ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "GPU Clients Port is not enough")
-					return nil, err
-				default:
-					err := fmt.Errorf("Unknown Error")
-					utilruntime.HandleError(err)
-					ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Unknown Error")
-					return nil, err
-				}
+			// get the gpu device uuid and update the pod resource configuration in configurator
+			// gpuDevUUID, errCode = ctr.getGPUDevUUIDAndUpdateConfig(schedNode, schedvGPUID, quotaReq, quotaLimit, smPartition, gpuMem, podKey, &gpuClientPort)
+			// klog.Infof("The pod = %s of FaSTPod %s with vGPUID = %s is bound to device UUID=%s with GPUClientPort=%d.", podKey, key, schedvGPUID, gpuDevUUID, gpuClientPort)
+
+			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectedNode.hostName, selectedGPU, request, podKey)
+
+			// errCode 0: no error
+			// errCode 1: node with nodeName is not initialized
+			// errCode 2: vGPUID is not initialized or no DummyPod created;
+			// errCode 3: resource exceed;
+			// errCode 4: GPU is out of memory
+			// errCode 5: No enough gpu client ports
+			switch errCode {
+			case 0:
+				klog.Infof("The pod is successfully bound.")
+				fstp2Pods[fstpName].PushBack(newPodName)
+			case 1:
+				return nil, errors.New("NodeNotInitialized")
+			case 2:
+				return nil, errors.New("Waiting4Dummy")
+			case 3:
+				err := fmt.Errorf("Compute Resource exceed!")
+				utilruntime.HandleError(err)
+				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Compute Resource exceed")
+				return nil, err
+			case 4:
+				err := fmt.Errorf("Out of memory!")
+				utilruntime.HandleError(err)
+				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Out of memory")
+				return nil, err
+			case 5:
+				err := fmt.Errorf("GPU Clients Port is full!")
+				utilruntime.HandleError(err)
+				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "GPU Clients Port is not enough")
+				return nil, err
+			default:
+				err := fmt.Errorf("Unknown Error")
+				utilruntime.HandleError(err)
+				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Unknown Error")
+				return nil, err
 			}
 
 			// Create the new pod for the fastpod
-			if node, ok := nodesInfo[schedNode]; ok {
-				klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
+			klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
 
-				pod := ctr.newPod(fastpod,
-					&NewPodParams{
-						PodName:      subpodName,
-						SchedNode:    schedNode,
-						SchedvGPUID:  schedvGPUID,
-						IsWarm:       false,
-						BoundDevUUID: gpuDevUUID,
-						MPSConfig: &MPSConfig{
-							LogDirectory:           "tmp_mps_log",
-							PipeDirectory:          "tmp_mps_pipe",
-							ActiveThreadPercentage: 40,
-							FastPodMPSConfig: &FastPodMPSConfig{
-								SchedulerIP:   node.DaemonIP,
-								GpuClientPort: gpuClientPort,
-							},
+			pod := ctr.newPod(fastpod,
+				&NewPodParams{
+					PodName:      subpodName,
+					SchedNode:    selectedNode.hostName,
+					SchedvGPUID:  allocation.UUID,
+					IsWarm:       false,
+					BoundDevUUID: allocation.UUID,
+					MPSConfig: &MPSConfig{
+						LogDirectory:           "tmp_mps_log",
+						PipeDirectory:          "tmp_mps_pipe",
+						ActiveThreadPercentage: 40,
+						FastPodMPSConfig: &FastPodMPSConfig{
+							SchedulerIP:   allocation.node.DaemonIP,
+							GpuClientPort: *allocation.MPSSchedulerPort,
 						},
-					})
+					},
+				})
 
-				newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
-				if err != nil {
-					klog.Errorf("Error when creating pod=%s for the FaSTPod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name)
-					klog.Errorf("Error: %s", err)
+			newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+			if err != nil {
+				klog.Errorf("Error when creating pod=%s for the FaSTPod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name)
+				klog.Errorf("Error: %s", err)
 
-					//undo resource configuration
+				//undo resource configuration
 
-					if apierrors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
-						return nil, nil
-					}
-					return nil, err
+				if apierrors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
+					return nil, nil
 				}
-				// KONTON_TODO
-				(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = schedvGPUID
-				(*fastpod.Status.GPUClientPort)[newpod.Name] = gpuClientPort
-				klog.Infof("Finished creating pod = %s.", subpodName)
-				return newpod, err
+				return nil, err
 			}
-
-			return nil, nil
+			// KONTON_TODO
+			(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = selectedGPU.ProvisionedGpu.Uuid
+			(*fastpod.Status.GPUClientPort)[newpod.Name] = *allocation.MPSSchedulerPort
+			klog.Infof("Finished creating pod = %s.", subpodName)
+			return newpod, nil
 
 		})
 
@@ -719,7 +661,7 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 		// configure the new resource via the fast-configurator
 		nodeName := pod.Spec.NodeName
 		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
-		node, ok := nodesInfo[nodeName]
+		node, ok := nodes[nodeName]
 		if !ok {
 			klog.Errorf("Error failed to get node information for the pod %s.", pod.ObjectMeta.Name)
 			continue
@@ -747,7 +689,7 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 		}
 		podreq.QtRequest, _ = strconv.ParseFloat(fastpod.ObjectMeta.Annotations[reqName], 64)
 		podreq.QtLimit, _ = strconv.ParseFloat(fastpod.ObjectMeta.Annotations[limitName], 64)
-		podreq.SMPartition, _ = strconv.ParseInt(fastpod.ObjectMeta.Annotations[smName], 10, 64)
+		podreq.SMPartition, _ = strconv.Atoi(fastpod.ObjectMeta.Annotations[smName])
 
 		ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.PodList)
 

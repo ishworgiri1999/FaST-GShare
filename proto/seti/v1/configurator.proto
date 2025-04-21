@@ -21,6 +21,8 @@ message VirtualGPU {
   uint64 memory_bytes = 3;
   int32 multiprocessor_count = 4;
   bool is_provisioned = 5;
+  bool is_physical = 9;
+
   optional GPU provisioned_gpu = 7;
 }
 
@@ -54,11 +56,11 @@ message RequestVirtualGPUResponse {
   int32 device_index = 2;
   uint64 memory_bytes = 3;
   int32 multiprocessor_count = 4;
-  bool is_provisioned = 5;
-  bool in_use = 6;
+
   optional GPU provisioned_gpu = 7;
 
   repeated VirtualGPU available_virtual_gpus = 8;
+
 }
 
 message GetHealthRequest {}

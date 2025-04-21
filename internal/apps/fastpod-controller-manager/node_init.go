@@ -91,32 +91,22 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	}
 
 	nodesInfoMtx.Lock()
-	if nodesInfo[hostName] != nil {
-		klog.Info(nodesInfo[hostName].vGPUID2GPU)
+	if nodes[hostName] != nil {
+		klog.Info(nodes[hostName].vGPUID2GPU)
 	}
-	if node, has := nodesInfo[hostName]; !has {
-		node = &NodeStatusInfo{
+	if node, has := nodes[hostName]; !has {
+		node = &Node{
 			vGPUID2GPU:      make(map[string]*GPUDevInfo),
 			UUID2SchedPort:  make(map[string]string),
 			UUID2GPUType:    make(map[string]string),
 			DaemonIP:        nodeIP,
 			DaemonPortAlloc: bitmap.NewBitmap(PortRange),
-		}
-		nodesInfo[hostName] = node
-	} else {
-		node.DaemonIP = nodeIP
-	}
-
-	if nodes[hostName] != nil {
-		klog.Info(nodes[hostName].vgpus)
-	}
-
-	if node, has := nodes[hostName]; !has {
-
-		node = &Node{
-			vgpus: response.Gpus,
+			vgpus:           response.Gpus,
+			hostName:        hostName,
 		}
 		nodes[hostName] = node
+	} else {
+		node.DaemonIP = nodeIP
 	}
 
 	nodesInfoMtx.Unlock()

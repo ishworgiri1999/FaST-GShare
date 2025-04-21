@@ -27,7 +27,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"entgo.io/ent/dialect"
 	fastpodcontrollermanager "github.com/KontonGu/FaST-GShare/internal/apps/fastpod-controller-manager"
+	"github.com/KontonGu/FaST-GShare/internal/db/ent"
 	clientset "github.com/KontonGu/FaST-GShare/pkg/client/clientset/versioned"
 	informers "github.com/KontonGu/FaST-GShare/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -87,10 +89,17 @@ func main() {
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	fastpodInformerFactory := informers.NewSharedInformerFactory(fastpodClient, time.Second*30)
 
+	dbClient, err := ent.Open(dialect.SQLite, "file:ent?mode=memory&cache=shared&_fk=1")
+	if err != nil {
+		klog.Fatalf("failed opening connection to sqlite: %v", err)
+	}
+
+	defer dbClient.Close()
 	controller := fastpodcontrollermanager.NewController(kubeClient, fastpodClient,
 		kubeInformerFactory.Core().V1().Nodes(),
 		kubeInformerFactory.Core().V1().Pods(),
-		fastpodInformerFactory.Fastgshare().V1().FaSTPods())
+		fastpodInformerFactory.Fastgshare().V1().FaSTPods(),
+		dbClient)
 
 	kubeInformerFactory.Start(stopCh)
 	fastpodInformerFactory.Start(stopCh)

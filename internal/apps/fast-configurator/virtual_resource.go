@@ -23,6 +23,7 @@ type VirtualGPU struct {
 	GPUInstance         *mig.GpuInstance
 	ComputeInstance     *mig.ComputeInstance
 	ProvisionedGPU      *GPU
+	Physical            bool
 	mutex               sync.Mutex
 }
 
@@ -141,6 +142,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				IsProvisioned:       true,
 				Name:                name,
 				InUse:               isUsed,
+				Physical:            true,
 				ProvisionedGPU: &GPU{
 					UUID:                uuid,
 					Name:                name,
