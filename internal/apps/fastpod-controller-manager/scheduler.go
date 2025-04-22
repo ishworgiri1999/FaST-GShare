@@ -54,9 +54,16 @@ type ResourceRequest struct {
 
 func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
 
+	if req.AllocationType == types.AllocationTypeMPS {
+	}
+
+	if req.AllocationType == types.AllocationTypeFastPod {
+
+	}
 	return nil, nil, nil
 }
 
+// deprecated:
 func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, quotaLimit float64, smPartition int64, gpuMem int64, isValid bool, key string) (string, string) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {

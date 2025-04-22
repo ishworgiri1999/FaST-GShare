@@ -56,6 +56,7 @@ type ExclusivePodReq struct {
 }
 
 type GPUDevInfo struct {
+	virtual        bool //can this be deleted
 	allocationType types.AllocationType
 	GPUType        string
 	UUID           string
@@ -506,6 +507,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 			return nil, 1
 		}
 		physicalGPU = resp.ProvisionedGpu
+		node.vgpus = resp.AvailableVirtualGpus
 
 	} else if !physicalGPU.MpsEnabled &&
 		(request.AllocationType == types.AllocationTypeFastPod ||
@@ -516,6 +518,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 			klog.Errorf("Error: The grpc client failed to enable mps, err = %s", err)
 			return nil, 1
 		}
+
 	}
 
 	gpuInfo, ok := node.vGPUID2GPU[physicalGPU.Uuid]
@@ -568,7 +571,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 			UUID:      gpuInfo.UUID,
 			MPSConfig: mpsConfig,
 		}, 0
-	} else if request.AllocationType == types.AllocationTypeMIG {
+	} else if request.AllocationType == types.AllocationTypeExclusive {
 		gpuInfo.ExclusivePod = &ExclusivePodReq{
 			Key: podKey,
 		}
@@ -688,21 +691,38 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 					}
 				}
 			}
-			if allocationType == types.AllocationTypeMIG {
+			if allocationType == types.AllocationTypeExclusive {
 				gpuInfo.ExclusivePod = nil
 				gpuInfo.Usage = 0
 				gpuInfo.UsageMem = 0
 				gpuInfo.Mem = 0
 				klog.Infof("[exclusive]Removing Pod=%s from the fastpod=%s, The vGPU=%s still has pods number=%d.", key, fastpod.Name, vGPUID, 0)
+
+			}
+			klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vGPUID)
+
+			if (podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
+				// destroy the gpu if possible
+				if gpuInfo.virtual {
+					//removal of gpu
+					resp, err := node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
+						Uuid: gpuInfo.UUID,
+					})
+
+					if err != nil {
+						klog.Errorf("Error when releasing the vGPU %s, err = %s", gpuInfo.UUID, err)
+					}
+
+					if len(resp.AvailableVirtualGpus) > 0 {
+						klog.Infof("Release vGPU %s successfully.", gpuInfo.UUID)
+						node.vgpus = resp.AvailableVirtualGpus
+
+					}
+				}
+				delete(node.vGPUID2GPU, vGPUID)
+
 			}
 
-			if podlist.Len() == 0 && allocationType != types.AllocationTypeMIG {
-				// destroy the gpu if possible
-				klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vGPUID)
-				node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
-					Uuid: gpuInfo.UUID,
-				})
-			}
 		}
 	}
 
@@ -732,12 +752,12 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 		allocationType := types.GetAllocationType(pod.Annotations[fastpodv1.FastGshareAllocationType])
 
 		if node, nodeOk := nodes[nodeName]; nodeOk {
-			if gpu, gpuOk := node.vGPUID2GPU[vgpuID]; gpuOk {
+			if gpuInfo, gpuOk := node.vGPUID2GPU[vgpuID]; gpuOk {
 				var podlist *list.List
 
 				//check allocation type
 				if allocationType == types.AllocationTypeFastPod {
-					podlist = gpu.FastPodList
+					podlist = gpuInfo.FastPodList
 
 					// delete pod information in the nodesInfo
 					for podreq := podlist.Front(); podreq != nil; podreq = podreq.Next() {
@@ -745,12 +765,12 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 						if podreqValue.Key == key {
 							klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
 							podlist.Remove(podreq)
-							uuid := gpu.UUID
+							uuid := gpuInfo.UUID
 
 							// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
-							gpu.Usage -= (float64(podreqValue.SMPartition) / 100.0)
+							gpuInfo.Usage -= (float64(podreqValue.SMPartition) / 100.0)
 
-							gpu.UsageMem -= podreqValue.Memory
+							gpuInfo.UsageMem -= podreqValue.Memory
 							ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
 							node.DaemonPortAlloc.Clear(podreqValue.GPUClientPort - GPUClientPortStart)
 
@@ -761,7 +781,7 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 				}
 
 				if allocationType == types.AllocationTypeMPS {
-					podlist = gpu.MPSPodList
+					podlist = gpuInfo.MPSPodList
 
 					// delete pod information in the nodesInfo
 					for podreq := podlist.Front(); podreq != nil; podreq = podreq.Next() {
@@ -769,25 +789,38 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 						if podreqValue.Key == key {
 							klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
 							podlist.Remove(podreq)
-							gpu.UsageMem -= podreqValue.Memory
+							gpuInfo.UsageMem -= podreqValue.Memory
 						}
 					}
 				}
 
-				if allocationType == types.AllocationTypeMIG {
-					gpu.ExclusivePod = nil
-					gpu.Usage = 0
-					gpu.UsageMem = 0
-					gpu.Mem = 0
+				if allocationType == types.AllocationTypeExclusive {
+					gpuInfo.ExclusivePod = nil
+					gpuInfo.Usage = 0
+					gpuInfo.UsageMem = 0
+					gpuInfo.Mem = 0
 					klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
 				}
 
-				if podlist.Len() == 0 { //check if destroying is possible
+				if (podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
 					// destroy the gpu if possible
-					klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vgpuID)
-					node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
-						Uuid: gpu.UUID,
-					})
+					if gpuInfo.virtual {
+						//removal of gpu
+						resp, err := node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
+							Uuid: gpuInfo.UUID,
+						})
+						if err != nil {
+							klog.Errorf("Error when releasing the vGPU %s, err = %s", gpuInfo.UUID, err)
+						}
+
+						if len(resp.AvailableVirtualGpus) > 0 {
+							klog.Infof("Release vGPU %s successfully.", gpuInfo.UUID)
+							node.vgpus = resp.AvailableVirtualGpus
+
+						}
+					}
+
+					delete(node.vGPUID2GPU, vgpuID)
 				}
 
 				// delete the pod in the kube system

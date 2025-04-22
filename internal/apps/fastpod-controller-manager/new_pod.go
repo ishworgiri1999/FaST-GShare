@@ -245,7 +245,7 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 
 	}
 
-	if allocationTypeValue == types.AllocationTypeMIG {
+	if allocationTypeValue == types.AllocationTypeExclusive {
 		smValueInt, err := strconv.Atoi(smValue)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SM value: %v", err)

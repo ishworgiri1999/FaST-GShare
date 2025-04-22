@@ -15,7 +15,7 @@ message GetAvailableGPUsResponse {
 
 // Message representing a virtual GPU
 message VirtualGPU {
-  optional string profileid = 6;
+  optional uint32 profileid = 6;
   string id = 1;
   int32 device_index = 2;
   uint64 memory_bytes = 3;
@@ -46,7 +46,7 @@ message MPSConfig {
 
 // Request for a virtual GPU with specific requirements
 message RequestVirtualGPURequest {
-  optional string profileid = 1;
+  optional uint32 profileid = 1;
   optional string device_uuid = 2;
   bool use_mps = 3;
 }

@@ -13,8 +13,8 @@ import (
 // but is only physically created when accessed
 type VirtualGPU struct {
 	Name                string
-	ID                  string
-	DeviceIndex         int // Index of the physical GPU that this virtual GPU can be created on
+	ID                  string //not unique
+	DeviceIndex         int    // Index of the physical GPU that this virtual GPU can be created on
 	MemoryBytes         uint64
 	MultiProcessorCount int
 	IsProvisioned       bool
@@ -117,8 +117,12 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 		// Check MIG capability
 		_, currentMode, ret := device.GetMigMode()
 
-		if ret == nvml.ERROR_NOT_SUPPORTED {
-			log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
+		if ret == nvml.ERROR_NOT_SUPPORTED || (ret == nvml.SUCCESS && currentMode != nvml.DEVICE_MIG_ENABLE) {
+			if ret == nvml.ERROR_NOT_SUPPORTED {
+				log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
+			} else {
+				log.Printf("MIG not enabled for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
+			}
 
 			smCount, err := GetSMCount(name)
 			if err != nil {
@@ -131,7 +135,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			// }
 
 			vGPU := &VirtualGPU{
-				ID:                  fmt.Sprintf("vgpu-%d", i),
+				ID:                  fmt.Sprintf("vgpu-physical-%s", uuid),
 				DeviceIndex:         i,
 				MemoryBytes:         memoo.Total,
 				MultiProcessorCount: int(smCount),
@@ -243,10 +247,10 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			}
 
 			old, ok := rm.provisionedGPUs[migDeviceUUID]
-
+			//todo check if need to set values as they are already there
 			vgpu := &VirtualGPU{
 				Name:                migDeviceName,
-				ID:                  fmt.Sprintf("vgpu-%d-mig-%d", i, j),
+				ID:                  fmt.Sprintf("vgpu-mig-%s", migDeviceUUID),
 				MultiProcessorCount: int(atters.MultiprocessorCount),
 				MemoryBytes:         migDeviceMemory.Total,
 				Mig: &MIGProperties{
@@ -323,7 +327,7 @@ func (rm *ResourceManager) GetVirtualGPU(deviceUUID string) (*VirtualGPU, error)
 	return nil, fmt.Errorf("virtual GPU with uuid %s not found", deviceUUID)
 }
 
-func (rm *ResourceManager) FindVirtualGPU(profileID string) (*VirtualGPU, error) {
+func (rm *ResourceManager) FindVirtualGPU(profileID uint32) (*VirtualGPU, error) {
 	rm.mutex.Lock()
 	defer rm.mutex.Unlock()
 
@@ -333,7 +337,7 @@ func (rm *ResourceManager) FindVirtualGPU(profileID string) (*VirtualGPU, error)
 			continue
 		}
 		// Check if this virtual GPU meets requirements
-		if vGPU.ID == profileID {
+		if vGPU.Mig != nil && vGPU.Mig.profile.Id == profileID {
 			return vGPU, nil
 		}
 	}
