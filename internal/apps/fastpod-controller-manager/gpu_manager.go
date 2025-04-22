@@ -57,6 +57,7 @@ type ExclusivePodReq struct {
 
 type GPUDevInfo struct {
 	virtual        bool //can this be deleted
+	smCount        int  // number of SMs not to be confused with SMPartition
 	allocationType types.AllocationType
 	GPUType        string
 	UUID           string
@@ -525,6 +526,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 
 	if !ok {
 		node.vGPUID2GPU[physicalGPU.Uuid] = &GPUDevInfo{
+			smCount:        int(physicalGPU.MultiprocessorCount),
 			allocationType: request.AllocationType,
 			UUID:           physicalGPU.Uuid,
 			GPUType:        physicalGPU.Name,

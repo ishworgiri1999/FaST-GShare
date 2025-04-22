@@ -53,17 +53,205 @@ type ResourceRequest struct {
 }
 
 func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
-
-	if req.AllocationType == types.AllocationTypeMPS {
+	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
+	if err != nil {
+		errInfo := fmt.Errorf("Error Cannot find gpu node with the lable \"gpu:present\"")
+		utilruntime.HandleError(errInfo)
+		return nil, nil, errInfo
 	}
 
-	if req.AllocationType == types.AllocationTypeFastPod {
-
+	type ScoredGPU struct {
+		VGPU  *seti.VirtualGPU
+		Node  *Node
+		Score float64
 	}
-	return nil, nil, nil
+
+	var candidates []ScoredGPU
+
+	for _, n := range nodeList {
+		node, ok := nodes[n.Name]
+		if !ok {
+			continue
+		}
+		allVGPU := node.vgpus
+		usageMap := node.vGPUID2GPU
+
+		for _, vgpu := range allVGPU {
+			var devInfo *GPUDevInfo
+			var memBytes int64
+			var uuid string
+
+			// If provisioned, use usage data
+			if vgpu.IsProvisioned && vgpu.ProvisionedGpu != nil {
+				uuid = vgpu.ProvisionedGpu.Uuid
+				memBytes = int64(vgpu.ProvisionedGpu.MemoryBytes)
+				devInfo = usageMap[uuid]
+			} else {
+				// Unprovisioned GPU — treat as empty GPU
+				memBytes = int64(vgpu.MemoryBytes)
+				uuid = vgpu.Id // fallback ID
+
+				//fake device info, not to be inserted into the map
+				devInfo = &GPUDevInfo{
+					smCount:        int(vgpu.MultiprocessorCount),
+					UUID:           uuid,
+					Mem:            memBytes,
+					Usage:          0,
+					UsageMem:       0,
+					allocationType: types.AllocationTypeNone,
+				}
+			}
+
+			// If we couldn't get memory info, skip this GPU
+			if memBytes == 0 {
+				continue
+			}
+
+			// Apply optional filters (e.g., RequestedGPUType, RequestedGPUUUID)
+			// if req.RequestedGPUType != nil &&
+			// 	vgpu.ProvisionedGpu != nil &&
+			// 	*req.RequestedGPUType != vgpu.ProvisionedGpu.Name {
+			// 	continue
+			// }
+
+			match := false
+			var score float64
+
+			switch req.AllocationType {
+			case types.AllocationTypeExclusive:
+				if canFitExclusive(req, devInfo) {
+					match = true
+					score = scoreExclusive(req, devInfo)
+				}
+
+			case types.AllocationTypeMPS:
+				if canFitMPSPod(req, devInfo) {
+					match = true
+					score = scoreMPSPod(req, devInfo)
+				}
+
+			case types.AllocationTypeFastPod:
+				if req.FastPodRequirements != nil &&
+					canFitFastPod(req, devInfo) {
+					match = true
+					score = scoreFastPod(req, devInfo)
+				}
+			}
+
+			if match {
+				candidates = append(candidates, ScoredGPU{VGPU: vgpu, Node: node, Score: score})
+			}
+		}
+	}
+
+	var scheduledNode *Node
+	var selectedGPU *seti.VirtualGPU
+
+	switch req.AllocationType {
+	case types.AllocationTypeMPS:
+	// MPS scheduling logic
+
+	case types.AllocationTypeFastPod:
+	// FastPod scheduling logic
+
+	case types.AllocationTypeExclusive:
+		// Exclusive scheduling logic
+	}
+
+	return scheduledNode, selectedGPU, nil
 }
 
-// deprecated:
+// canFitExclusive returns true if this GPU is completely free,
+// has at least the requested memory, and (if specified) has enough SMs.
+func canFitExclusive(req *ResourceRequest, info *GPUDevInfo) bool {
+	if req.AllocationType != types.AllocationTypeExclusive {
+		return false
+	}
+	// Exclusive must start on a fresh GPU
+	if info.allocationType != types.AllocationTypeNone {
+		return false
+	}
+	// Memory requirement
+	if info.Mem < req.Memory {
+		return false
+	}
+	// SM requirement (if any) — SMRequest is an absolute count
+	if req.SMRequest != nil && info.smCount < *req.SMRequest {
+		return false
+	}
+	return true
+}
+
+// canFitMPSPod returns true if this GPU is either already MPS
+// or unused, and has enough free memory.
+func canFitMPSPod(req *ResourceRequest, info *GPUDevInfo) bool {
+	if req.AllocationType != types.AllocationTypeMPS {
+		return false
+	}
+	allocOK := info.allocationType == types.AllocationTypeMPS ||
+		info.allocationType == types.AllocationTypeNone
+	if !allocOK {
+		return false
+	}
+	return (info.Mem - info.UsageMem) >= req.Memory
+}
+
+// canFitFastPod returns true if this GPU is either already a FastPod host
+// or unused, has enough free memory, and enough SM headroom
+// (QuotaReq is fractional, e.g. 0.2 → 20% of SMs).
+func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
+	if req.AllocationType != types.AllocationTypeFastPod {
+		return false
+	}
+	allocOK := info.allocationType == types.AllocationTypeFastPod ||
+		info.allocationType == types.AllocationTypeNone
+	if !allocOK {
+		return false
+	}
+	if (info.Mem - info.UsageMem) < req.Memory {
+		return false
+	}
+	quota := req.FastPodRequirements.QuotaReq
+	return (1.0 - info.Usage) >= quota
+}
+
+// scoreExclusive prefers GPUs whose SM‐count is just large enough
+// and whose total RAM is minimal (to reduce waste).
+func scoreExclusive(req *ResourceRequest, info *GPUDevInfo) float64 {
+	// Distance between GPU.SMCount and requested SM
+	smDiff := float64(info.smCount - *req.SMRequest)
+	// smaller difference → higher score
+	smScore := -smDiff
+	// smaller total RAM → higher score
+	memScore := -float64(info.Mem)
+	// weight SM more heavily
+	return smScore*1e6 + memScore
+}
+
+// scoreMPSPod gives a bonus for reuse, otherwise ranks
+// unprovisioned GPUs by “SMs per byte of RAM” (higher is better).
+func scoreMPSPod(req *ResourceRequest, info *GPUDevInfo) float64 {
+	if info.allocationType == types.AllocationTypeMPS {
+		// reuse bonus + pack more memory‐utilization
+		return 2.0 + float64(info.UsageMem)/float64(info.Mem)
+	}
+	// unprovisioned: prefer GPUs with many SMs and small RAM
+	return float64(info.smCount) / float64(info.Mem)
+}
+
+// scoreFastPod gives a big bonus for FastPod reuse and then
+// favors high SM and mem utilization.
+func scoreFastPod(req *ResourceRequest, info *GPUDevInfo) float64 {
+	reuseBonus := 0.0
+	if info.allocationType == types.AllocationTypeFastPod {
+		reuseBonus = 3.0
+	}
+	memUtil := float64(info.UsageMem) / float64(info.Mem)
+	smUtil := info.Usage
+	return reuseBonus + memUtil + smUtil
+}
+
+// deprecated: use FindBestNode instead
 func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, quotaLimit float64, smPartition int64, gpuMem int64, isValid bool, key string) (string, string) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {

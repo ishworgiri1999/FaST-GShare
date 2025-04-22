@@ -258,6 +258,10 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 
 func validatePodRequest(request *ResourceRequest) (bool, error) {
 
+	if request.AllocationType == types.AllocationTypeNone {
+		return false, fmt.Errorf("AllocationType is None")
+	}
+
 	if request.FastPodRequirements != nil {
 		if request.FastPodRequirements.QuotaLimit > 1.0 || request.FastPodRequirements.QuotaLimit < 0.0 {
 			return false, fmt.Errorf("invalid quota limitation value: %f", request.FastPodRequirements.QuotaLimit)
