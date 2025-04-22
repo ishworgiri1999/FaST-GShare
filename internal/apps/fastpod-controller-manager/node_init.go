@@ -9,6 +9,7 @@ import (
 
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -33,15 +34,21 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		klog.Errorf("Error: %v", err)
 		return err
 	}
-	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
-	// daemonPodName := hostName
-	// daemonPod, err := kubeClient.CoreV1().Pods("kube-system").Get(context.TODO(), daemonPodName, metav1.GetOptions{})
-	// if err != nil {
-	// 	klog.Errorf("Error cannot find the node daemonset.")
-	// 	return
-	// }
-	// nodeName := daemonPod.Spec.NodeName
+	nodeHostName := helloMessage.Hostname
 
+	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
+	daemonPodName := nodeHostName
+	daemonPod, err := kubeClient.CoreV1().Pods("kube-system").Get(context.TODO(), daemonPodName, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Error cannot find the node daemonset. Using the default node name.")
+	}
+	if len(daemonPod.Spec.NodeName) > 0 {
+
+		nodeHostName = daemonPod.Spec.NodeName
+		klog.Infof("Node name is: %s", nodeHostName)
+	}
+
+	hostName := nodeHostName
 	//ack the hello message
 	ackMsg := types.ConfiguratorNodeAckMessage{
 		Ok: true,
@@ -62,8 +69,6 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	}
 
 	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
-
-	hostName := helloMessage.Hostname
 
 	client := NewGrpcClient()
 
