@@ -52,18 +52,18 @@ type ResourceRequest struct {
 	FastPodRequirements *FastPodRequirements
 }
 
+type ScoredGPU struct {
+	VGPU  *seti.VirtualGPU
+	Node  *Node
+	Score float64
+}
+
 func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {
 		errInfo := fmt.Errorf("Error Cannot find gpu node with the lable \"gpu:present\"")
 		utilruntime.HandleError(errInfo)
 		return nil, nil, errInfo
-	}
-
-	type ScoredGPU struct {
-		VGPU  *seti.VirtualGPU
-		Node  *Node
-		Score float64
 	}
 
 	var candidates []ScoredGPU
@@ -144,21 +144,21 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 		}
 	}
 
-	var scheduledNode *Node
-	var selectedGPU *seti.VirtualGPU
+	return ctr.selectBestCandidate(fastpod, req, candidates)
+}
 
-	switch req.AllocationType {
-	case types.AllocationTypeMPS:
-	// MPS scheduling logic
+func (ctr *Controller) selectBestCandidate(fastpod *fastpodv1.FaSTPod, req *ResourceRequest, candidates []ScoredGPU) (*Node, *seti.VirtualGPU, error) {
 
-	case types.AllocationTypeFastPod:
-	// FastPod scheduling logic
-
-	case types.AllocationTypeExclusive:
-		// Exclusive scheduling logic
+	if len(candidates) == 0 {
+		return nil, nil, fmt.Errorf("no suitable candidates found")
 	}
-
-	return scheduledNode, selectedGPU, nil
+	bestCandidate := candidates[0]
+	for _, candidate := range candidates {
+		if candidate.Score > bestCandidate.Score {
+			bestCandidate = candidate
+		}
+	}
+	return bestCandidate.Node, bestCandidate.VGPU, nil
 }
 
 // canFitExclusive returns true if this GPU is completely free,
