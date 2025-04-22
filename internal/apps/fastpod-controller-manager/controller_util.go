@@ -343,10 +343,10 @@ func RandStr(n int) string {
 	return string(s)
 }
 
-func FindInQueue(key string, pl *list.List) (*PodReq, bool) {
+func FindInQueue(key string, pl *list.List) (*FastPodReq, bool) {
 	for k := pl.Front(); k != nil; k = k.Next() {
-		if k.Value.(*PodReq).Key == key {
-			return k.Value.(*PodReq), true
+		if k.Value.(*FastPodReq).Key == key {
+			return k.Value.(*FastPodReq), true
 		}
 	}
 	return nil, false

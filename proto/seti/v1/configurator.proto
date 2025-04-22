@@ -94,6 +94,7 @@ message EnableMPSRequest {
 message EnableMPSResponse {
   bool success = 1;
   string message = 2;
+  MPSConfig mps_config = 3;
 }
 message DisableMPSRequest {
   string device_uuid = 1;
@@ -105,13 +106,15 @@ message DisableMPSResponse {
 
 // Message for requesting to release a virtual GPU
 message ReleaseVirtualGPURequest {
-  string id = 1;
+  string uuid = 1;
 }
 
 // Response for a virtual GPU release request
 message ReleaseVirtualGPUResponse {
   bool success = 1;
   string message = 2;
+
+  repeated VirtualGPU available_virtual_gpus = 3;
 }
 
 // Service definition for GPU resource management

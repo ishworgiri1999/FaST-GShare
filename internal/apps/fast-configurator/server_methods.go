@@ -9,6 +9,46 @@ import (
 	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 )
 
+// Mapper function: normal GPU to seti.GPU
+func mapToSetiGPU(gpu *GPU) *seti.GPU {
+	if gpu == nil {
+		return nil
+	}
+	return &seti.GPU{
+		Uuid:                gpu.UUID,
+		Name:                gpu.Name,
+		MemoryBytes:         gpu.MemoryBytes,
+		MultiprocessorCount: int32(gpu.MultiProcessorCount),
+		ParentDeviceIndex:   int32(gpu.ParentDeviceIndex),
+		ParentUuid:          gpu.ParentUUID,
+		MpsEnabled:          gpu.mpsServer.isEnabled,
+		MpsConfig: &seti.MPSConfig{
+			DeviceUuid: gpu.UUID,
+			LogPath:    gpu.mpsServer.GetLogDir(),
+			TmpPath:    gpu.mpsServer.GetPipeDir(),
+		},
+	}
+}
+
+// Mapper function: VirtualGPU to seti.VirtualGPU
+func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
+	if vgpu == nil {
+		return nil
+	}
+	var provisionedGPU *seti.GPU
+	if vgpu.ProvisionedGPU != nil {
+		provisionedGPU = mapToSetiGPU(vgpu.ProvisionedGPU)
+	}
+	return &seti.VirtualGPU{
+		Id:                  vgpu.ID,
+		MemoryBytes:         vgpu.MemoryBytes,
+		DeviceIndex:         int32(vgpu.DeviceIndex),
+		MultiprocessorCount: int32(vgpu.MultiProcessorCount),
+		IsProvisioned:       vgpu.IsProvisioned,
+		ProvisionedGpu:      provisionedGPU,
+	}
+}
+
 // GetAvailableGPUs returns a list of available GPUs
 func (s *ConfiguratorServer) GetAvailableGPUs(ctx context.Context, in *seti.GetAvailableGPUsRequest) (*seti.GetAvailableGPUsResponse, error) {
 	log.Printf("Received request for available GPUs: %v", in)
@@ -21,26 +61,8 @@ func (s *ConfiguratorServer) GetAvailableGPUs(ctx context.Context, in *seti.GetA
 	gpus := []*seti.VirtualGPU{}
 
 	for _, vgpu := range virtuals {
-		var provisionedGPU *seti.GPU
-		if vgpu.ProvisionedGPU != nil {
-			provisionedGPU = &seti.GPU{
-				Uuid:                vgpu.ProvisionedGPU.UUID,
-				Name:                vgpu.ProvisionedGPU.Name,
-				MemoryBytes:         vgpu.ProvisionedGPU.MemoryBytes,
-				MultiprocessorCount: int32(vgpu.ProvisionedGPU.MultiProcessorCount),
-				ParentDeviceIndex:   int32(vgpu.ProvisionedGPU.ParentDeviceIndex),
-				ParentUuid:          vgpu.ProvisionedGPU.ParentUUID,
-			}
-		}
 
-		gpu := &seti.VirtualGPU{
-			Id:                  vgpu.ID,
-			MemoryBytes:         vgpu.MemoryBytes,
-			DeviceIndex:         int32(vgpu.DeviceIndex),
-			MultiprocessorCount: int32(vgpu.MultiProcessorCount),
-			IsProvisioned:       vgpu.IsProvisioned,
-			ProvisionedGpu:      provisionedGPU,
-		}
+		gpu := mapToSetiVirtualGPU(vgpu)
 		gpus = append(gpus, gpu)
 	}
 	return &seti.GetAvailableGPUsResponse{
@@ -84,9 +106,6 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 		return nil, fmt.Errorf("no suitable virtual GPU available")
 	}
 
-	// Mark as in use
-	vgpu.InUse = true
-
 	// If MIG is requested, provision it
 	if in.Profileid != nil && !vgpu.IsProvisioned && vgpu.Mig != nil {
 		if err := s.manager.Access(vgpu); err != nil {
@@ -116,46 +135,29 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 
 	// Add provisioned GPU info if available
 	if vgpu.ProvisionedGPU != nil {
-		response.ProvisionedGpu = &seti.GPU{
-			Uuid:                vgpu.ProvisionedGPU.UUID,
-			Name:                vgpu.ProvisionedGPU.Name,
-			MemoryBytes:         vgpu.ProvisionedGPU.MemoryBytes,
-			MultiprocessorCount: int32(vgpu.ProvisionedGPU.MultiProcessorCount),
-			ParentDeviceIndex:   int32(vgpu.ProvisionedGPU.ParentDeviceIndex),
-			ParentUuid:          vgpu.ProvisionedGPU.ParentUUID,
-			MpsEnabled:          vgpu.ProvisionedGPU.mpsServer.isEnabled,
-		}
+		response.ProvisionedGpu = mapToSetiGPU(vgpu.ProvisionedGPU)
 	}
 
 	// Get the current available GPUs and add to response
 	availableGPUs := s.manager.getAvailableVirtualResources()
 
 	for _, vg := range availableGPUs {
-		if !vg.InUse {
-			var provisionedGPU *seti.GPU
-			if vg.ProvisionedGPU != nil {
-				provisionedGPU = &seti.GPU{
-					Uuid:                vg.ProvisionedGPU.UUID,
-					Name:                vg.ProvisionedGPU.Name,
-					MemoryBytes:         vg.ProvisionedGPU.MemoryBytes,
-					MultiprocessorCount: int32(vg.ProvisionedGPU.MultiProcessorCount),
-					ParentDeviceIndex:   int32(vg.ProvisionedGPU.ParentDeviceIndex),
-					ParentUuid:          vg.ProvisionedGPU.ParentUUID,
-					MpsEnabled:          vg.ProvisionedGPU.mpsServer.isEnabled,
-				}
-			}
-
-			vGPU := &seti.VirtualGPU{
-				Id:                  vg.ID,
-				DeviceIndex:         int32(vg.DeviceIndex),
-				MemoryBytes:         vg.MemoryBytes,
-				MultiprocessorCount: int32(vg.MultiProcessorCount),
-				IsProvisioned:       vg.IsProvisioned,
-
-				ProvisionedGpu: provisionedGPU,
-			}
-			response.AvailableVirtualGpus = append(response.AvailableVirtualGpus, vGPU)
+		var provisionedGPU *seti.GPU
+		if vg.ProvisionedGPU != nil {
+			provisionedGPU = mapToSetiGPU(vg.ProvisionedGPU)
 		}
+
+		vGPU := &seti.VirtualGPU{
+			Id:                  vg.ID,
+			DeviceIndex:         int32(vg.DeviceIndex),
+			MemoryBytes:         vg.MemoryBytes,
+			MultiprocessorCount: int32(vg.MultiProcessorCount),
+			IsProvisioned:       vg.IsProvisioned,
+
+			ProvisionedGpu: provisionedGPU,
+		}
+		response.AvailableVirtualGpus = append(response.AvailableVirtualGpus, vGPU)
+
 	}
 
 	return response, nil
@@ -167,30 +169,34 @@ func (s *ConfiguratorServer) ReleaseVirtualGPU(ctx context.Context, in *seti.Rel
 
 	// Find the virtual GPU by ID
 
-	s.manager.FindVirtualGPU(in.Id)
-	for _, vgpu := range s.manager.VirtualGPUs {
-		if vgpu.ID == in.Id {
+	vgpu, err := s.manager.FindVirtualGPUUsingUUID(in.Uuid)
+	if err != nil {
+		return &seti.ReleaseVirtualGPUResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to find virtual GPU: %v", err),
+		}, nil
 
-			// If provisioned using MIG, release resources
-			if vgpu.IsProvisioned && !vgpu.IsProvisioned && vgpu.Mig != nil {
-				if err := vgpu.Release(); err != nil {
-					return &seti.ReleaseVirtualGPUResponse{
-						Success: false,
-						Message: fmt.Sprintf("Failed to release virtual GPU: %v", err),
-					}, nil
-				}
-			}
+	}
+	// If provisioned using MIG, release resources
+	if err := vgpu.Release(); err != nil {
+		return &seti.ReleaseVirtualGPUResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to release virtual GPU: %v", err),
+		}, nil
+	}
 
-			return &seti.ReleaseVirtualGPUResponse{
-				Success: true,
-				Message: fmt.Sprintf("Successfully released virtual GPU %s", in.Id),
-			}, nil
-		}
+	availabe := s.manager.getAvailableVirtualResources()
+
+	var availableSetiVGpus []*seti.VirtualGPU
+	for _, vgpu := range availabe {
+
+		availableSetiVGpus = append(availableSetiVGpus, mapToSetiVirtualGPU(vgpu))
 	}
 
 	return &seti.ReleaseVirtualGPUResponse{
-		Success: false,
-		Message: fmt.Sprintf("Virtual GPU with ID %s not found", in.Id),
+		Success:              true,
+		Message:              fmt.Sprintf("Successfully released virtual GPU %s", in.Uuid),
+		AvailableVirtualGpus: availableSetiVGpus,
 	}, nil
 }
 
@@ -199,75 +205,82 @@ func (s *ConfiguratorServer) EnableMPS(ctx context.Context, in *seti.EnableMPSRe
 	log.Printf("Received request to enable MPS for device: %s", in.DeviceUuid)
 
 	// Find the GPU by UUID
-	for _, vgpu := range s.manager.VirtualGPUs {
-		if vgpu.ProvisionedGPU != nil && vgpu.ProvisionedGPU.UUID == in.DeviceUuid {
-			// Create MPS server if not already created
-			if vgpu.ProvisionedGPU.mpsServer.UUID == "" {
-				mpsServer, err := NewMPSServer(vgpu.ProvisionedGPU.Name, vgpu.ProvisionedGPU.UUID)
-				if err != nil {
-					return &seti.EnableMPSResponse{
-						Success: false,
-						Message: fmt.Sprintf("Failed to create MPS server: %v", err),
-					}, nil
-				}
-				vgpu.ProvisionedGPU.mpsServer = *mpsServer
-			}
-
-			// Start MPS daemon if not already running
-			if !vgpu.ProvisionedGPU.mpsServer.isEnabled {
-				err := vgpu.ProvisionedGPU.mpsServer.StartMPSDaemon()
-				if err != nil {
-					return &seti.EnableMPSResponse{
-						Success: false,
-						Message: fmt.Sprintf("Failed to start MPS daemon: %v", err),
-					}, nil
-				}
-				vgpu.ProvisionedGPU.mpsServer.isEnabled = true
-			}
-
+	vgpu := s.manager.provisionedGPUs[in.DeviceUuid]
+	if vgpu == nil {
+		return &seti.EnableMPSResponse{
+			Success: false,
+			Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
+		}, nil
+	}
+	// Create MPS server if not already created
+	if vgpu.ProvisionedGPU.mpsServer.UUID == "" {
+		mpsServer, err := NewMPSServer(vgpu.ProvisionedGPU.Name, vgpu.ProvisionedGPU.UUID)
+		if err != nil {
 			return &seti.EnableMPSResponse{
-				Success: true,
-				Message: fmt.Sprintf("Successfully enabled MPS for device %s", in.DeviceUuid),
+				Success: false,
+				Message: fmt.Sprintf("Failed to create MPS server: %v", err),
 			}, nil
 		}
+		vgpu.ProvisionedGPU.mpsServer = *mpsServer
+	}
+
+	// Start MPS daemon if not already running
+	if !vgpu.ProvisionedGPU.mpsServer.isEnabled {
+		err := vgpu.ProvisionedGPU.mpsServer.StartMPSDaemon()
+		if err != nil {
+			return &seti.EnableMPSResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to start MPS daemon: %v", err),
+			}, nil
+		}
+		vgpu.ProvisionedGPU.mpsServer.isEnabled = true
 	}
 
 	return &seti.EnableMPSResponse{
-		Success: false,
-		Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
+		Success: true,
+		Message: fmt.Sprintf("Successfully enabled MPS for device %s", in.DeviceUuid),
+		MpsConfig: &seti.MPSConfig{
+			DeviceUuid: in.DeviceUuid,
+			LogPath:    vgpu.ProvisionedGPU.mpsServer.GetLogDir(),
+			TmpPath:    vgpu.ProvisionedGPU.mpsServer.GetPipeDir(),
+		},
 	}, nil
+
 }
 
 // DisableMPS disables MPS for a specific GPU device
 func (s *ConfiguratorServer) DisableMPS(ctx context.Context, in *seti.DisableMPSRequest) (*seti.DisableMPSResponse, error) {
 	log.Printf("Received request to disable MPS for device: %s", in.DeviceUuid)
 
-	// Find the GPU by UUID
-	for _, vgpu := range s.manager.VirtualGPUs {
-		if vgpu.ProvisionedGPU != nil && vgpu.ProvisionedGPU.UUID == in.DeviceUuid {
-			// Stop MPS daemon if running
-			if vgpu.ProvisionedGPU.mpsServer.isEnabled {
-				err := vgpu.ProvisionedGPU.mpsServer.StopMPSDaemon()
-				if err != nil {
-					return &seti.DisableMPSResponse{
-						Success: false,
-						Message: fmt.Sprintf("Failed to stop MPS daemon: %v", err),
-					}, nil
-				}
-				vgpu.ProvisionedGPU.mpsServer.isEnabled = false
-			}
+	vgpu := s.manager.provisionedGPUs[in.DeviceUuid]
+	if vgpu == nil {
+		return &seti.DisableMPSResponse{
+			Success: false,
+			Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
+		}, nil
+	}
 
+	// Stop MPS daemon if running
+	if vgpu.ProvisionedGPU.mpsServer.isEnabled {
+		err := vgpu.ProvisionedGPU.mpsServer.StopMPSDaemon()
+		if err != nil {
 			return &seti.DisableMPSResponse{
-				Success: true,
-				Message: fmt.Sprintf("Successfully disabled MPS for device %s", in.DeviceUuid),
+				Success: false,
+				Message: fmt.Sprintf("Failed to stop MPS daemon: %v", err),
 			}, nil
 		}
+		vgpu.ProvisionedGPU.mpsServer.isEnabled = false
+	}
+
+	if err := vgpu.ProvisionedGPU.mpsServer.CleanupDirectories(); err != nil {
+		log.Printf("Warning: failed to clean up MPS directories: %v", err)
 	}
 
 	return &seti.DisableMPSResponse{
-		Success: false,
-		Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
+		Success: true,
+		Message: fmt.Sprintf("Successfully disabled MPS for device %s", in.DeviceUuid),
 	}, nil
+
 }
 
 // UpdateMPSConfigs updates MPS configurations for a device with FastPod GPU configurations

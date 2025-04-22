@@ -22,15 +22,15 @@ type NewPodParams struct {
 }
 
 type MPSConfig struct {
-	LogDirectory           string
-	PipeDirectory          string
-	ActiveThreadPercentage int
-	FastPodMPSConfig       *FastPodMPSConfig
+	LogDirectory     string
+	PipeDirectory    string
+	FastPodMPSConfig *FastPodMPSConfig
 }
 
 type FastPodMPSConfig struct {
-	SchedulerIP   string
-	GpuClientPort int
+	SchedulerIP            string
+	GpuClientPort          int
+	ActiveThreadPercentage int
 }
 
 // newPod create a new pod specification based on the given information for the FaSTPod
@@ -159,7 +159,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaLimit] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
 	annotationCopy[fastpodv1.FaSTGShareGPUMemory] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
 	annotationCopy[fastpodv1.FaSTGShareVGPUID] = params.SchedvGPUID
-
+	annotationCopy[fastpodv1.FastGshareAllocationType] = fastpod.ObjectMeta.Annotations[fastpodv1.FastGshareAllocationType]
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      params.PodName,

@@ -178,7 +178,7 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 	// write resource configuration
 	if podlist != nil {
 		for pod := podlist.Front(); pod != nil; pod = pod.Next() {
-			podRequest := pod.Value.(*PodReq)
+			podRequest := pod.Value.(*FastPodReq)
 			podGPUConfigRequest.FastpodGpuConfigs = append(podGPUConfigRequest.FastpodGpuConfigs, &seti.FastPodGPUConfig{
 				Key:         podRequest.Key,
 				QtRequest:   podRequest.QtRequest,

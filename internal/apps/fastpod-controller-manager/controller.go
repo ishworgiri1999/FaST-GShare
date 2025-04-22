@@ -556,23 +556,16 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// Create the new pod for the fastpod
 			klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
 
-			pod := ctr.newPod(fastpod,
-				&NewPodParams{
-					PodName:      subpodName,
-					SchedNode:    selectedNode.hostName,
-					SchedvGPUID:  allocation.UUID,
-					IsWarm:       false,
-					BoundDevUUID: allocation.UUID,
-					MPSConfig: &MPSConfig{
-						LogDirectory:           "tmp_mps_log",
-						PipeDirectory:          "tmp_mps_pipe",
-						ActiveThreadPercentage: 40,
-						FastPodMPSConfig: &FastPodMPSConfig{
-							SchedulerIP:   allocation.node.DaemonIP,
-							GpuClientPort: *allocation.MPSSchedulerPort,
-						},
-					},
-				})
+			podParams := &NewPodParams{
+				PodName:      subpodName,
+				SchedNode:    selectedNode.hostName,
+				SchedvGPUID:  allocation.UUID,
+				IsWarm:       false,
+				BoundDevUUID: allocation.UUID,
+				MPSConfig:    allocation.MPSConfig,
+			}
+
+			pod := ctr.newPod(fastpod, podParams)
 
 			newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 			if err != nil {
@@ -588,7 +581,10 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			}
 			// KONTON_TODO
 			(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = selectedGPU.ProvisionedGpu.Uuid
-			(*fastpod.Status.GPUClientPort)[newpod.Name] = *allocation.MPSSchedulerPort
+
+			if allocation.MPSConfig.FastPodMPSConfig != nil {
+				(*fastpod.Status.GPUClientPort)[newpod.Name] = *&allocation.MPSConfig.FastPodMPSConfig.GpuClientPort
+			}
 			klog.Infof("Finished creating pod = %s.", subpodName)
 			return newpod, nil
 
@@ -677,7 +673,7 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 			klog.Errorf("Error getting key: %v\n", err)
 			continue
 		}
-		podreq, isFound := FindInQueue(key, gpuInfo.PodList)
+		podreq, isFound := FindInQueue(key, gpuInfo.FastPodList)
 		if !isFound {
 			klog.Errorf("Error failed to get pod information information for the pod %s.", pod.ObjectMeta.Name)
 			continue
@@ -691,7 +687,7 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 		podreq.QtLimit, _ = strconv.ParseFloat(fastpod.ObjectMeta.Annotations[limitName], 64)
 		podreq.SMPartition, _ = strconv.Atoi(fastpod.ObjectMeta.Annotations[smName])
 
-		ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.PodList)
+		ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.FastPodList)
 
 		// update the spec.Annotation of the resource configuration for the pod of the fastpod
 		podcpy := pod.DeepCopy()

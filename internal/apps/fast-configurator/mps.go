@@ -32,6 +32,13 @@ func (m *MPSServer) SetupMPSEnvironment() error {
 	return nil
 }
 
+func (m *MPSServer) GetLogDir() string {
+	return fmt.Sprintf("/tmp/mps_log_%s", m.UUID)
+}
+func (m *MPSServer) GetPipeDir() string {
+	return fmt.Sprintf("/tmp/mps_%s", m.UUID)
+}
+
 // CreateDirectories creates required directories for MPS
 func (m *MPSServer) CreateDirectories() error {
 	dirs := []string{

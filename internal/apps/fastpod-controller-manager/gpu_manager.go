@@ -37,7 +37,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type PodReq struct {
+type FastPodReq struct {
 	Key           string
 	QtRequest     float64
 	QtLimit       float64
@@ -46,16 +46,27 @@ type PodReq struct {
 	GPUClientPort int
 }
 
+type MPSPodReq struct {
+	Key    string
+	Memory int64
+}
+
+type ExclusivePodReq struct {
+	Key string
+}
+
 type GPUDevInfo struct {
 	allocationType types.AllocationType
 	GPUType        string
 	UUID           string
 	Mem            int64
-	// Usage of GPU resource, SM * QtRequest
+	// Usage of GPU resource, SM * QtRequest only for FastPod
 	Usage float64
 	// Usage of GPU Memory
-	UsageMem int64
-	PodList  *list.List
+	UsageMem     int64
+	FastPodList  *list.List //FastPodReq
+	MPSPodList   *list.List //MPSPodReq
+	ExclusivePod *ExclusivePodReq
 }
 
 type Node struct {
@@ -140,24 +151,24 @@ func (ctr *Controller) gpuNodeInit() error {
 				DaemonPortAlloc: pBm,
 			}
 			node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
-				GPUType:  gpuType,
-				UUID:     gpuUuid,
-				Mem:      0,
-				Usage:    0.0,
-				UsageMem: 0,
-				PodList:  list.New(),
+				GPUType:     gpuType,
+				UUID:        gpuUuid,
+				Mem:         0,
+				Usage:       0.0,
+				UsageMem:    0,
+				FastPodList: list.New(),
 			}
 			nodes[dpod.Spec.NodeName] = node
 		} else {
 			// The node already has information in nodesInfo, meaning at least one GPU's dummyPod have been initialized;
 			// considering the scenario of multiple gpus in a node, initialize this dummyPod's physical gpu in the nodesInfo.
 			node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
-				GPUType:  gpuType,
-				UUID:     gpuUuid,
-				Mem:      0,
-				Usage:    0.0,
-				UsageMem: 0,
-				PodList:  list.New(),
+				GPUType:     gpuType,
+				UUID:        gpuUuid,
+				Mem:         0,
+				Usage:       0.0,
+				UsageMem:    0,
+				FastPodList: list.New(),
 			}
 		}
 	}
@@ -249,7 +260,7 @@ func (ctr *Controller) gpuNodeInit() error {
 			gpu_info.Usage += quota_req * (float64(sm_partition) / 100.0)
 			gpu_info.Mem += gpu_mem
 			podPort := (*fastpod.Status.GPUClientPort)[pod.ObjectMeta.Name]
-			gpu_info.PodList.PushBack(&PodReq{
+			gpu_info.FastPodList.PushBack(&FastPodReq{
 				Key:           fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name),
 				QtRequest:     quota_req,
 				QtLimit:       quota_limit,
@@ -412,15 +423,15 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 		return "", 2
 	}
 
-	if podreq, isFound := FindInQueue(key, gpuInfo.PodList); !isFound {
+	if podreq, isFound := FindInQueue(key, gpuInfo.FastPodList); !isFound {
 		// newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
 		//Without TIME Quota
 		newSMUsage := gpuInfo.Usage + (float64(smPartition) / 100.0)
 
 		if newSMUsage > 1.0 {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough compute resource to pod %s, GPUAllocated=%f, GPUReq=%f.", gpuInfo.UUID, vGPUID, key, gpuInfo.Usage, quotaReq*(float64(smPartition)/100.0))
-			for k := gpuInfo.PodList.Front(); k != nil; k = k.Next() {
-				klog.Infof("Pod = %s, Usage=%f, MemUsage=%d", k.Value.(*PodReq).Key, k.Value.(*PodReq).QtRequest*(float64(k.Value.(*PodReq).SMPartition)/100.0), k.Value.(*PodReq).Memory)
+			for k := gpuInfo.FastPodList.Front(); k != nil; k = k.Next() {
+				klog.Infof("Pod = %s, Usage=%f, MemUsage=%d", k.Value.(*FastPodReq).Key, k.Value.(*FastPodReq).QtRequest*(float64(k.Value.(*FastPodReq).SMPartition)/100.0), k.Value.(*FastPodReq).Memory)
 			}
 			return "", 3
 		}
@@ -441,7 +452,7 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 		gpuInfo.Usage = newSMUsage
 		gpuInfo.UsageMem = newMemoryUsage
 
-		gpuInfo.PodList.PushBack(&PodReq{
+		gpuInfo.FastPodList.PushBack(&FastPodReq{
 			Key:           key,
 			QtRequest:     quotaReq,
 			QtLimit:       quotaLimit,
@@ -454,15 +465,16 @@ func (ctr *Controller) getGPUDevUUIDAndUpdateConfig(nodeName, vGPUID string, quo
 		*port = podreq.GPUClientPort
 	}
 
-	ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.PodList)
+	ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.FastPodList)
 	return gpuInfo.UUID, 0
 
 }
 
 type Allocation struct {
-	UUID             string
-	node             *Node
-	MPSSchedulerPort *int
+	UUID string
+	node *Node
+
+	MPSConfig *MPSConfig
 }
 
 func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.VirtualGPU, request *ResourceRequest, podKey string) (*Allocation, int) {
@@ -478,6 +490,10 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 
 	//get gpu
 	physicalGPU := gpu.ProvisionedGpu
+
+	var mpsConfig *MPSConfig
+	var fastPodMPSConfig *FastPodMPSConfig
+
 	if physicalGPU == nil {
 		klog.Info("Error: The physical GPU is nil, CREATING NEW VGPU")
 		resp, err := node.grpcClient.RequestVirtualGPU(context.TODO(), &seti.RequestVirtualGPURequest{
@@ -512,7 +528,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 			Mem:            int64(physicalGPU.MemoryBytes),
 			Usage:          0.0,
 			UsageMem:       0,
-			PodList:        list.New(),
+			FastPodList:    list.New(),
 		}
 	}
 	//rare case
@@ -520,19 +536,60 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		klog.Errorf("Error: The allocation type is not the same, %s != %s", gpuInfo.allocationType, request.AllocationType)
 		return nil, 1
 	}
+	if physicalGPU.MpsConfig != nil {
+		mpsConfig = &MPSConfig{
+			LogDirectory:  physicalGPU.MpsConfig.LogPath,
+			PipeDirectory: physicalGPU.MpsConfig.TmpPath,
+		}
+	}
 
 	port := 0
 
-	if podreq, isFound := FindInQueue(podKey, gpuInfo.PodList); !isFound {
+	if request.AllocationType == types.AllocationTypeMPS {
+
+		if _, isFound := FindInQueue(podKey, gpuInfo.MPSPodList); !isFound {
+			newMemoryUsage := gpuInfo.UsageMem + request.Memory
+			if newMemoryUsage > gpuInfo.Mem {
+				klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough memory to pod %s, MemUsed=%d, MemReq=%d, MemTotal=%d.", gpuInfo.UUID, gpu.Id, podKey, gpuInfo.UsageMem, request.Memory, gpuInfo.Mem)
+				return nil, 4
+			}
+
+			gpuInfo.UsageMem = newMemoryUsage
+
+			gpuInfo.MPSPodList.PushBack(&MPSPodReq{
+				Key:    podKey,
+				Memory: request.Memory,
+			})
+
+		}
+
+		return &Allocation{
+			node:      node,
+			UUID:      gpuInfo.UUID,
+			MPSConfig: mpsConfig,
+		}, 0
+	} else if request.AllocationType == types.AllocationTypeMIG {
+		gpuInfo.ExclusivePod = &ExclusivePodReq{
+			Key: podKey,
+		}
+
+		return &Allocation{
+			node: node,
+			UUID: gpuInfo.UUID,
+		}, 0
+	}
+
+	//handle fastpod case
+	if podreq, isFound := FindInQueue(podKey, gpuInfo.FastPodList); !isFound {
 
 		// newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
 		//Without TIME Quota
-		newSMUsage := gpuInfo.Usage + (float64(*request.SMRequest) / 100.0)
+		newSMUsage := gpuInfo.Usage + (float64(*&request.FastPodRequirements.SMPartition) / 100.0)
 
 		if newSMUsage > 1.0 {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough compute resource to pod %s, GPUAllocated=%f, GPUReq=%f.", gpuInfo.UUID, gpu.Id, podKey, gpuInfo.Usage, (float64(*request.SMRequest) / 100.0))
-			for k := gpuInfo.PodList.Front(); k != nil; k = k.Next() {
-				klog.Infof("Pod = %s, Usage=%f, MemUsage=%d", k.Value.(*PodReq).Key, k.Value.(*PodReq).QtRequest*(float64(k.Value.(*PodReq).SMPartition)/100.0), k.Value.(*PodReq).Memory)
+			for k := gpuInfo.FastPodList.Front(); k != nil; k = k.Next() {
+				klog.Infof("Pod = %s, Usage=%f, MemUsage=%d", k.Value.(*FastPodReq).Key, k.Value.(*FastPodReq).QtRequest*(float64(k.Value.(*FastPodReq).SMPartition)/100.0), k.Value.(*FastPodReq).Memory)
 			}
 			return nil, 3
 		}
@@ -553,7 +610,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		gpuInfo.Usage = newSMUsage
 		gpuInfo.UsageMem = newMemoryUsage
 
-		gpuInfo.PodList.PushBack(&PodReq{
+		gpuInfo.FastPodList.PushBack(&FastPodReq{
 			Key:           podreq.Key,
 			QtRequest:     request.FastPodRequirements.QuotaLimit,
 			QtLimit:       request.FastPodRequirements.QuotaLimit,
@@ -565,12 +622,21 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 	} else {
 		port = podreq.GPUClientPort
 	}
+	if request.AllocationType == types.AllocationTypeFastPod {
+		ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.FastPodList)
+	}
 
-	ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.PodList)
+	fastPodMPSConfig = &FastPodMPSConfig{
+		SchedulerIP:            node.DaemonIP,
+		GpuClientPort:          port,
+		ActiveThreadPercentage: *&request.FastPodRequirements.SMPartition,
+	}
+
+	mpsConfig.FastPodMPSConfig = fastPodMPSConfig
 	return &Allocation{
-		node:             node,
-		UUID:             gpuInfo.UUID,
-		MPSSchedulerPort: &port,
+		node:      node,
+		UUID:      gpuInfo.UUID,
+		MPSConfig: mpsConfig,
 	}, 0
 
 }
@@ -579,6 +645,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1.Pod) {
 	nodeName := pod.Spec.NodeName
 	vGPUID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
+	allocationType := types.GetAllocationType(pod.Annotations[fastpodv1.FastGshareAllocationType])
 	key := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 
 	nodesInfoMtx.Lock()
@@ -586,34 +653,60 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 
 	if node, has := nodes[nodeName]; has {
 		if gpuInfo, ghas := node.vGPUID2GPU[vGPUID]; ghas {
-			podlist := gpuInfo.PodList
-			for pod := podlist.Front(); pod != nil; pod = pod.Next() {
-				podreq := pod.Value.(*PodReq)
-				if podreq.Key == key {
-					podlist.Remove(pod)
-					klog.Infof("Removing Pod=%s from the fastpod=%s, The vGPU=%s still has pods number=%d.", key, fastpod.Name, vGPUID, podlist.Len())
-					uuid := gpuInfo.UUID
-					remove := false
+			var podlist *list.List
+			if allocationType == types.AllocationTypeFastPod {
 
-					if podlist.Len() == 0 {
-						// // additional logical if we need to release the physical gpu, currently our policy is to manage all gpus.
-						//delete(nodeInfo.vGPUID2GPU, vGPUID)
-						//remove = true
-					} else {
+				podlist = gpuInfo.FastPodList
+				for pod := podlist.Front(); pod != nil; pod = pod.Next() {
+					podreq := pod.Value.(*FastPodReq)
+					if podreq.Key == key {
+						podlist.Remove(pod)
+						klog.Infof("[fastpod]Removing Pod=%s from the fastpod=%s, The vGPU=%s still has pods number=%d.", key, fastpod.Name, vGPUID, podlist.Len())
+						uuid := gpuInfo.UUID
+
 						gpuInfo.UsageMem -= podreq.Memory
 						gpuInfo.Usage -= podreq.QtRequest * (float64(podreq.SMPartition) / 100.0)
 						ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
-					}
-					node.DaemonPortAlloc.Clear(podreq.GPUClientPort - GPUClientPortStart)
 
-					// currently the release of the physical gpu is disabled, fastgshare manages all the gpus
-					if remove {
-						ctr.deleteDummyPod(nodeName, vGPUID, uuid)
+						node.DaemonPortAlloc.Clear(podreq.GPUClientPort - GPUClientPortStart)
+						break
+
 					}
 				}
 			}
+			if allocationType == types.AllocationTypeMPS {
+				podlist = gpuInfo.MPSPodList
+				for pod := podlist.Front(); pod != nil; pod = pod.Next() {
+					podreq := pod.Value.(*MPSPodReq)
+					if podreq.Key == key {
+						podlist.Remove(pod)
+						klog.Infof("[mps]Removing Pod=%s from the fastpod=%s, The vGPU=%s still has pods number=%d.", key, fastpod.Name, vGPUID, podlist.Len())
+
+						gpuInfo.UsageMem -= podreq.Memory
+
+						break
+					}
+				}
+			}
+			if allocationType == types.AllocationTypeMIG {
+				gpuInfo.ExclusivePod = nil
+				gpuInfo.Usage = 0
+				gpuInfo.UsageMem = 0
+				gpuInfo.Mem = 0
+				klog.Infof("[exclusive]Removing Pod=%s from the fastpod=%s, The vGPU=%s still has pods number=%d.", key, fastpod.Name, vGPUID, 0)
+			}
+
+			if podlist.Len() == 0 && allocationType != types.AllocationTypeMIG {
+				// destroy the gpu if possible
+				klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vGPUID)
+				node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
+					Uuid: gpuInfo.UUID,
+				})
+			}
 		}
 	}
+
+	klog.Infof("Pod %s removed from fastpod %s.", pod.Name, fastpod.Name)
 }
 
 // Remove the FaSTPod instance, update fastpod podlist in nodesInfo and
@@ -636,27 +729,67 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 		nodeName := pod.Spec.NodeName
 		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
 		key := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
+		allocationType := types.GetAllocationType(pod.Annotations[fastpodv1.FastGshareAllocationType])
 
 		if node, nodeOk := nodes[nodeName]; nodeOk {
 			if gpu, gpuOk := node.vGPUID2GPU[vgpuID]; gpuOk {
-				podlist := gpu.PodList
-				// delete pod information in the nodesInfo
-				for podreq := podlist.Front(); podreq != nil; podreq = podreq.Next() {
-					podreqValue := podreq.Value.(*PodReq)
-					if podreqValue.Key == key {
-						klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
-						podlist.Remove(podreq)
-						uuid := gpu.UUID
+				var podlist *list.List
 
-						// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
-						gpu.Usage -= (float64(podreqValue.SMPartition) / 100.0)
+				//check allocation type
+				if allocationType == types.AllocationTypeFastPod {
+					podlist = gpu.FastPodList
 
-						gpu.UsageMem -= podreqValue.Memory
-						ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
-						node.DaemonPortAlloc.Clear(podreqValue.GPUClientPort - GPUClientPortStart)
-						continue
+					// delete pod information in the nodesInfo
+					for podreq := podlist.Front(); podreq != nil; podreq = podreq.Next() {
+						podreqValue := podreq.Value.(*FastPodReq)
+						if podreqValue.Key == key {
+							klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
+							podlist.Remove(podreq)
+							uuid := gpu.UUID
+
+							// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
+							gpu.Usage -= (float64(podreqValue.SMPartition) / 100.0)
+
+							gpu.UsageMem -= podreqValue.Memory
+							ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
+							node.DaemonPortAlloc.Clear(podreqValue.GPUClientPort - GPUClientPortStart)
+
+						}
+						break
+					}
+
+				}
+
+				if allocationType == types.AllocationTypeMPS {
+					podlist = gpu.MPSPodList
+
+					// delete pod information in the nodesInfo
+					for podreq := podlist.Front(); podreq != nil; podreq = podreq.Next() {
+						podreqValue := podreq.Value.(*MPSPodReq)
+						if podreqValue.Key == key {
+							klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
+							podlist.Remove(podreq)
+							gpu.UsageMem -= podreqValue.Memory
+						}
 					}
 				}
+
+				if allocationType == types.AllocationTypeMIG {
+					gpu.ExclusivePod = nil
+					gpu.Usage = 0
+					gpu.UsageMem = 0
+					gpu.Mem = 0
+					klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
+				}
+
+				if podlist.Len() == 0 { //check if destroying is possible
+					// destroy the gpu if possible
+					klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vgpuID)
+					node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
+						Uuid: gpu.UUID,
+					})
+				}
+
 				// delete the pod in the kube system
 				err := ctr.kubeClient.CoreV1().Pods(namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 				if err != nil {

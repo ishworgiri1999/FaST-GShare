@@ -353,6 +353,7 @@ func writeMsgToConn(conn net.Conn, b []byte) error {
 	return nil
 }
 
+// Deprecated
 func registerGPUDevices(conn net.Conn, gpus []*VirtualGPU) {
 
 	gpu_num := len(gpus)
@@ -387,7 +388,6 @@ func registerGPUDevices(conn net.Conn, gpus []*VirtualGPU) {
 				MemoryBytes:         gpus[i].MemoryBytes,
 				MultiProcessorCount: gpus[i].MultiProcessorCount,
 				IsProvisioned:       gpus[i].IsProvisioned,
-				InUse:               gpus[i].InUse,
 				ProvisionedGPU:      provisionedGPU,
 			}
 

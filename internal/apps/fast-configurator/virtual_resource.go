@@ -18,7 +18,6 @@ type VirtualGPU struct {
 	MemoryBytes         uint64
 	MultiProcessorCount int
 	IsProvisioned       bool
-	InUse               bool
 	Mig                 *MIGProperties
 	GPUInstance         *mig.GpuInstance
 	ComputeInstance     *mig.ComputeInstance
@@ -128,10 +127,8 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			}
 
 			// Safely check if the GPU is already provisioned
-			var isUsed bool
-			if vGPU, exists := rm.provisionedGPUs[uuid]; exists && vGPU != nil {
-				isUsed = vGPU.InUse
-			}
+			// if vGPU, exists := rm.provisionedGPUs[uuid]; exists && vGPU != nil {
+			// }
 
 			vGPU := &VirtualGPU{
 				ID:                  fmt.Sprintf("vgpu-%d", i),
@@ -141,7 +138,6 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				Mig:                 nil,
 				IsProvisioned:       true,
 				Name:                name,
-				InUse:               isUsed,
 				Physical:            true,
 				ProvisionedGPU: &GPU{
 					UUID:                uuid,
@@ -345,6 +341,19 @@ func (rm *ResourceManager) FindVirtualGPU(profileID string) (*VirtualGPU, error)
 	return nil, fmt.Errorf("virtual GPU with prolfile id %s not found", profileID)
 }
 
+func (rm *ResourceManager) FindVirtualGPUUsingUUID(uuid string) (*VirtualGPU, error) {
+	rm.mutex.Lock()
+	defer rm.mutex.Unlock()
+
+	// Check if this virtual GPU meets requirements
+	vgpu, ok := rm.provisionedGPUs[uuid]
+	if ok {
+		return vgpu, nil
+	}
+
+	return nil, fmt.Errorf("virtual GPU with uuid %s not found", uuid)
+}
+
 // Access provisions the GPU instance and compute instance if not already done
 func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	v.mutex.Lock()
@@ -458,6 +467,13 @@ func (v *VirtualGPU) Release() error {
 		return nil // Nothing to do
 	}
 
+	// if mps remove
+
+	err := v.ProvisionedGPU.mpsServer.StopMPSDaemon()
+	if err != nil {
+		log.Printf("Warning: Failed to stop MPS daemon: %v", err)
+	}
+
 	// Destroy compute instance first
 	if v.ComputeInstance != nil {
 		if ret := v.ComputeInstance.Destroy(); ret != nvml.SUCCESS {
@@ -477,6 +493,5 @@ func (v *VirtualGPU) Release() error {
 	v.IsProvisioned = false
 	v.ProvisionedGPU = nil
 
-	v.InUse = false
 	return nil
 }
