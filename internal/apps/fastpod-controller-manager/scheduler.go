@@ -61,10 +61,12 @@ type ScoredGPU struct {
 func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {
-		errInfo := fmt.Errorf("Error Cannot find gpu node with the lable \"gpu:present\"")
+		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
 		utilruntime.HandleError(errInfo)
 		return nil, nil, errInfo
 	}
+
+	klog.Infof("Nodelist count is: %d", len(nodeList))
 
 	var candidates []ScoredGPU
 
@@ -74,6 +76,8 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 			continue
 		}
 		allVGPU := node.vgpus
+
+		klog.Infof("scheduler: node %s has %d GPUs", n.Name, len(allVGPU))
 		usageMap := node.vGPUID2GPU
 
 		for _, vgpu := range allVGPU {
@@ -85,7 +89,17 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 			if vgpu.IsProvisioned && vgpu.ProvisionedGpu != nil {
 				uuid = vgpu.ProvisionedGpu.Uuid
 				memBytes = int64(vgpu.ProvisionedGpu.MemoryBytes)
-				devInfo = usageMap[uuid]
+				devInfo, ok = usageMap[uuid]
+				if !ok {
+					devInfo = &GPUDevInfo{
+						smCount:        int(vgpu.ProvisionedGpu.MultiprocessorCount),
+						UUID:           uuid,
+						Mem:            memBytes,
+						Usage:          0,
+						UsageMem:       0,
+						allocationType: types.AllocationTypeNone,
+					}
+				}
 			} else {
 				// Unprovisioned GPU — treat as empty GPU
 				memBytes = int64(vgpu.MemoryBytes)
@@ -144,10 +158,10 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 		}
 	}
 
-	return ctr.selectBestCandidate(fastpod, req, candidates)
+	return ctr.selectBestCandidate(candidates)
 }
 
-func (ctr *Controller) selectBestCandidate(fastpod *fastpodv1.FaSTPod, req *ResourceRequest, candidates []ScoredGPU) (*Node, *seti.VirtualGPU, error) {
+func (ctr *Controller) selectBestCandidate(candidates []ScoredGPU) (*Node, *seti.VirtualGPU, error) {
 
 	if len(candidates) == 0 {
 		return nil, nil, fmt.Errorf("no suitable candidates found")
@@ -186,11 +200,13 @@ func canFitExclusive(req *ResourceRequest, info *GPUDevInfo) bool {
 // or unused, and has enough free memory.
 func canFitMPSPod(req *ResourceRequest, info *GPUDevInfo) bool {
 	if req.AllocationType != types.AllocationTypeMPS {
+		klog.Info("AllocationType is not MPS")
 		return false
 	}
 	allocOK := info.allocationType == types.AllocationTypeMPS ||
 		info.allocationType == types.AllocationTypeNone
 	if !allocOK {
+		klog.Infof("GPU AllocationType is not MPS or None")
 		return false
 	}
 	return (info.Mem - info.UsageMem) >= req.Memory

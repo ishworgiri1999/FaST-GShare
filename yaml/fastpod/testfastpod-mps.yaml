@@ -1,0 +1,32 @@
+apiVersion: fastgshare.caps.in.tum/v1
+kind: FaSTPod
+metadata:
+  name: test-fastpod
+  namespace: fast-gshare
+  annotations: 
+    fastgshare/allocation_type: "MPS"
+    fastgshare/gpu_mem: "2700000000"
+spec:
+  replicas: 1
+  podSpec:
+    containers:
+    - name: resnet-pytorch
+      image: docker.io/kontonpuku666/mlperf-resnet:pytorch
+      
+      # env:
+      #   - name: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE
+      #     value: "60"
+      
+      ports:
+      - containerPort: 5000
+        hostPort: 5000
+      volumeMounts:
+        - name: "model-volume"
+          mountPath: "/models/"
+    volumes:
+        - name: "model-volume"
+          hostPath:
+            path: "/models/"
+  
+  
+    

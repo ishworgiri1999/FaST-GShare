@@ -4,9 +4,9 @@ type AllocationType string
 
 const (
 	AllocationTypeMPS       AllocationType = "MPS"
-	AllocationTypeFastPod   AllocationType = "FastPod"
-	AllocationTypeExclusive AllocationType = "Exclusive"
-	AllocationTypeNone      AllocationType = "None"
+	AllocationTypeFastPod   AllocationType = "FASTPOD"
+	AllocationTypeExclusive AllocationType = "EXCLUSIVE"
+	AllocationTypeNone      AllocationType = "NONE"
 )
 
 func GetAllocationType(allocationType string) AllocationType {

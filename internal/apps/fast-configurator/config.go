@@ -3,7 +3,8 @@ package fastconfigurator
 import "fmt"
 
 var SmMap = map[string]int{
-	"NVIDIA T1000": 16,
+	"NVIDIA T1000":          16,
+	"NVIDIA A100-PCIE-40GB": 108,
 }
 
 func GetSMCount(gpuName string) (int, error) {

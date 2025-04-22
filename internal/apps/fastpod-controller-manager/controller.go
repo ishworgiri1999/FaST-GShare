@@ -492,9 +492,11 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 				return nil, nil
 			}
 
+			klog.Infof("Request for pod with resource %v", request)
+
 			selectedNode, selectedGPU, err := ctr.FindBestNode(fastpod, request)
 			if selectedNode == nil || selectedGPU == nil || err != nil {
-				klog.Infof("Error cannot find the best node for the fastpod %s.", key)
+				klog.Infof("Error cannot find the best node for the fastpod %s. %s", key, err)
 				return nil, errors.New("NoSchedNodeAvailable")
 			}
 

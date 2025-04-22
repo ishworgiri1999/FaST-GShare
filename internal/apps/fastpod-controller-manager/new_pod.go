@@ -199,7 +199,7 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 	vgpuType := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUType]
 	vgpuUUID := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]
 
-	allocationTypeValue := types.AllocationType(allocationType)
+	allocationTypeValue := types.GetAllocationType(allocationType)
 
 	gpuMemoryValue, err := strconv.ParseInt(gpuMemory, 10, 64)
 	if err != nil {

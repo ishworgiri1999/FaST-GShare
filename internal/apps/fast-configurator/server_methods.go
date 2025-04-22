@@ -118,9 +118,9 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 		// Try to start MPS daemon
 		mpsServer := vgpu.ProvisionedGPU.mpsServer
 
-		err := mpsServer.StartMPSDaemon()
+		err := mpsServer.SetupMPSEnvironment()
 		if err != nil {
-			log.Printf("Warning: Failed to start MPS daemon: %v", err)
+			log.Printf("Warning: Failed to setup MPS environment: %v", err)
 		}
 
 	}
@@ -212,26 +212,15 @@ func (s *ConfiguratorServer) EnableMPS(ctx context.Context, in *seti.EnableMPSRe
 			Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
 		}, nil
 	}
-	// Create MPS server if not already created
-	if vgpu.ProvisionedGPU.mpsServer.UUID == "" {
-		mpsServer, err := NewMPSServer(vgpu.ProvisionedGPU.Name, vgpu.ProvisionedGPU.UUID)
-		if err != nil {
-			return &seti.EnableMPSResponse{
-				Success: false,
-				Message: fmt.Sprintf("Failed to create MPS server: %v", err),
-			}, nil
-		}
-		vgpu.ProvisionedGPU.mpsServer = *mpsServer
-	}
 
 	// Start MPS daemon if not already running
 	if !vgpu.ProvisionedGPU.mpsServer.isEnabled {
-		err := vgpu.ProvisionedGPU.mpsServer.StartMPSDaemon()
+		err := vgpu.ProvisionedGPU.mpsServer.SetupMPSEnvironment()
 		if err != nil {
 			return &seti.EnableMPSResponse{
 				Success: false,
 				Message: fmt.Sprintf("Failed to start MPS daemon: %v", err),
-			}, nil
+			}, err
 		}
 		vgpu.ProvisionedGPU.mpsServer.isEnabled = true
 	}

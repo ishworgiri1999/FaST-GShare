@@ -85,11 +85,6 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		return err
 	}
 
-	// after succful conn. save the connection to the node configurator
-	nodes[hostName] = &Node{
-		grpcClient: client,
-	}
-
 	response, err := client.GetAvailableGPUs(context.TODO())
 	if err != nil {
 		klog.Errorf("Error while getting the available GPUs from the node configurator.")
@@ -99,6 +94,8 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	if nodes[hostName] != nil {
 		klog.Info(nodes[hostName].vGPUID2GPU)
 	}
+	// after succful conn. save the connection to the node configurator
+
 	if node, has := nodes[hostName]; !has {
 		node = &Node{
 			vGPUID2GPU:      make(map[string]*GPUDevInfo),
@@ -108,16 +105,23 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 			DaemonPortAlloc: bitmap.NewBitmap(PortRange),
 			vgpus:           response.Gpus,
 			hostName:        hostName,
+			grpcClient:      client,
 		}
 		nodes[hostName] = node
+		klog.Infof("gpu inside node len %d", len(node.vgpus))
 	} else {
+		node.vgpus = response.Gpus
+		node.grpcClient = client
+		klog.Infof("gpu inside node len %d", len(node.vgpus))
 		node.DaemonIP = nodeIP
 	}
 
 	nodesInfoMtx.Unlock()
 
 	klog.Infof("Received available GPUs from node configurator: %v", hostName)
-
+	for _, gpu := range response.Gpus {
+		klog.Infof("GPU: %v", gpu)
+	}
 	defer client.Close()
 
 	klog.Infof("Received health check response from node configurator: %v", health)

@@ -6,8 +6,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // MPSServer represents an NVIDIA Multi-Process Service server instance
@@ -19,6 +22,10 @@ type MPSServer struct {
 
 // SetupMPSEnvironment sets up directories and MPS daemon for a specific UUID
 func (m *MPSServer) SetupMPSEnvironment() error {
+	if m.isEnabled {
+		log.Printf("MPS daemon already started for GPU %s: %s", m.Name, m.UUID)
+		return nil
+	}
 	if err := m.CreateDirectories(); err != nil {
 		return fmt.Errorf("failed to create MPS directories: %w", err)
 	}
@@ -42,8 +49,8 @@ func (m *MPSServer) GetPipeDir() string {
 // CreateDirectories creates required directories for MPS
 func (m *MPSServer) CreateDirectories() error {
 	dirs := []string{
-		fmt.Sprintf("/tmp/mps_%s", m.UUID),
-		fmt.Sprintf("/tmp/mps_log_%s", m.UUID),
+		m.GetPipeDir(),
+		m.GetLogDir(),
 	}
 
 	for _, dir := range dirs {
@@ -62,8 +69,8 @@ func (m *MPSServer) CreateDirectories() error {
 // CleanupDirectories removes MPS directories
 func (m *MPSServer) CleanupDirectories() error {
 	dirs := []string{
-		fmt.Sprintf("/tmp/mps_%s", m.UUID),
-		fmt.Sprintf("/tmp/mps_log_%s", m.UUID),
+		m.GetPipeDir(),
+		m.GetLogDir(),
 	}
 
 	var lastErr error
@@ -80,12 +87,12 @@ func (m *MPSServer) CleanupDirectories() error {
 func (m *MPSServer) BuildEnvironment() []string {
 	return []string{
 		fmt.Sprintf("CUDA_VISIBLE_DEVICES=%s", m.UUID),
-		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=/tmp/mps_%s", m.UUID),
-		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log_%s", m.UUID),
+		fmt.Sprintf("CUDA_MPS_PIPE_DIRECTORY=%s", m.GetPipeDir()),
+		fmt.Sprintf("CUDA_MPS_LOG_DIRECTORY=%s", m.GetLogDir()),
 	}
 }
 
-// StartMPSDaemon starts MPS daemon with specified environment
+// StartMPSDaemon starts the MPS daemon with -d (daemonize).
 func (m *MPSServer) StartMPSDaemon() error {
 	if m.isEnabled {
 		log.Printf("MPS daemon already started for GPU %s: %s", m.Name, m.UUID)
@@ -93,92 +100,85 @@ func (m *MPSServer) StartMPSDaemon() error {
 	}
 
 	env := m.BuildEnvironment()
+	// IMPORTANT: add "-d" to make it a true daemon
 	cmd := exec.Command("nvidia-cuda-mps-control", "-d")
 	cmd.Env = append(os.Environ(), env...)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start MPS daemon: %w", err)
-	}
-
-	// Give the daemon a moment to start and verify it's running
-	time.Sleep(500 * time.Millisecond)
-	if running, err := m.IsMPSDaemonRunning(); err != nil {
-		log.Printf("Warning: couldn't verify MPS daemon status: %v", err)
-	} else if !running {
-		return fmt.Errorf("MPS daemon failed to start properly")
-	}
-
-	m.isEnabled = true
-	log.Printf("MPS daemon started for GPU %s: %s with environment: %v", m.Name, m.UUID, env)
-	return nil
-}
-
-// IsMPSDaemonRunning checks if the MPS daemon is currently running
-func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "ps", "-ef")
-	output, err := cmd.Output()
-	if err != nil {
-		return false, fmt.Errorf("failed to execute ps command: %w", err)
-	}
-
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.Contains(line, "nvidia-cuda-mps-control") &&
-			strings.Contains(line, m.UUID) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// StopMPSDaemon stops the MPS daemon for the specified GPU
-func (m *MPSServer) StopMPSDaemon() error {
-	if !m.isEnabled {
-		return nil
-	}
-
-	env := m.BuildEnvironment()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "nvidia-cuda-mps-control")
-	cmd.Env = append(os.Environ(), env...)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start nvidia-cuda-mps-control: %w", err)
+	// Use Run(), which does Start()+Wait() internally
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to start MPS daemon: %w", err)
 	}
 
-	if _, err := stdin.Write([]byte("quit\n")); err != nil {
-		return fmt.Errorf("failed to write quit command: %w", err)
+	// Give it a moment
+	time.Sleep(500 * time.Millisecond)
+
+	// running, err := m.IsMPSDaemonRunning()
+	// if err != nil {
+	// 	log.Printf("Warning: couldn't verify MPS daemon status: %v", err)
+	// } else if !running {
+	// 	return fmt.Errorf("MPS daemon failed to start properly")
+	// }
+
+	m.isEnabled = true
+	log.Printf("MPS daemon started for GPU %s (%s). Environment: %v",
+		m.Name, m.UUID, env)
+
+	klog.Infof("klog:MPS daemon started for GPU %s (%s). Environment: %v",
+		m.Name, m.UUID, env)
+	return nil
+}
+
+// IsMPSDaemonRunning checks for the GPU‐specific MPS pipes.
+// Returns true only if both "control" and "request" named pipes exist.
+func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
+	pipeDir := m.GetPipeDir() // e.g. "/tmp/mps_<UUID>"
+	controlPipe := filepath.Join(pipeDir, "control")
+	requestPipe := filepath.Join(pipeDir, "request")
+
+	for _, p := range []string{controlPipe, requestPipe} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// pipe isn’t there → daemon not running for this GPU
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to stat %s: %w", p, err)
+		}
+		if fi.Mode()&os.ModeNamedPipe == 0 {
+			// exists but isn’t a pipe
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// StopMPSDaemon cleanly tells MPS to quit, then removes dirs.
+func (m *MPSServer) StopMPSDaemon() error {
+	if !m.isEnabled {
+		log.Printf("MPS daemon not running for GPU %s: %s", m.Name, m.UUID)
+		return nil
 	}
 
-	if err := stdin.Close(); err != nil {
-		log.Printf("Warning: error closing stdin pipe: %v", err)
-	}
+	// Use bash -c to pipe "quit" into the control binary
+	cmd := exec.Command("bash", "-c", "echo quit | nvidia-cuda-mps-control")
+	cmd.Env = append(os.Environ(), m.BuildEnvironment()...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-	if err := cmd.Wait(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to stop MPS daemon: %w", err)
 	}
 
-	// Verify MPS daemon has stopped
+	// Give it a moment to die
 	time.Sleep(500 * time.Millisecond)
 	if running, err := m.IsMPSDaemonRunning(); err != nil {
 		log.Printf("Warning: couldn't verify MPS daemon status: %v", err)
 	} else if running {
-		return fmt.Errorf("MPS daemon is still running after stop command")
+		return fmt.Errorf("MPS daemon is still running after quit")
 	}
 
-	// Clean up directories after successful stop
 	if err := m.CleanupDirectories(); err != nil {
 		log.Printf("Warning: failed to clean up MPS directories: %v", err)
 	}

@@ -32,6 +32,7 @@ import (
 	"github.com/KontonGu/FaST-GShare/internal/db/ent"
 	clientset "github.com/KontonGu/FaST-GShare/pkg/client/clientset/versioned"
 	informers "github.com/KontonGu/FaST-GShare/pkg/client/informers/externalversions"
+	_ "github.com/mattn/go-sqlite3"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
