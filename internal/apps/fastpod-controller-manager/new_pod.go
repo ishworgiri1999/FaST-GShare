@@ -246,11 +246,20 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 	}
 
 	if allocationTypeValue == types.AllocationTypeExclusive {
-		smValueInt, err := strconv.Atoi(smValue)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse SM value: %v", err)
+		//one is enough
+		smValueInt, err1 := strconv.Atoi(smValue)
+
+		smPartitionValue, err2 := strconv.Atoi(smPartition)
+
+		if err1 != nil && err2 != nil {
+			return nil, fmt.Errorf("failed to parse SM value: %v", err1)
 		}
-		resourceRequest.SMRequest = &smValueInt
+
+		if smValueInt > 0 {
+			resourceRequest.SMRequest = &smValueInt
+		} else {
+			resourceRequest.SMPercentage = &smPartitionValue
+		}
 	}
 
 	return resourceRequest, nil
@@ -274,6 +283,21 @@ func validatePodRequest(request *ResourceRequest) (bool, error) {
 		if request.FastPodRequirements.SMPartition < 0 || request.FastPodRequirements.SMPartition > 100 {
 			return false, fmt.Errorf("invalid SM partition value: %d", request.FastPodRequirements.SMPartition)
 		}
+	}
+
+	if request.AllocationType == types.AllocationTypeExclusive {
+		if request.SMRequest == nil && request.SMPercentage == nil {
+			return false, fmt.Errorf("either SMRequest or SMPercentage must be provided for exclusive allocation")
+		}
+
+		if request.SMRequest != nil && *request.SMRequest <= 0 {
+			return false, fmt.Errorf("SMRequest must be greater than 0")
+		}
+
+		if request.SMPercentage != nil && (*request.SMPercentage < 0 || *request.SMPercentage > 100) {
+			return false, fmt.Errorf("SMPercentage must be between 0 and 100")
+		}
+
 	}
 
 	if request.Memory < 0 {

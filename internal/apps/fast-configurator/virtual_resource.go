@@ -23,6 +23,7 @@ type VirtualGPU struct {
 	ComputeInstance     *mig.ComputeInstance
 	ProvisionedGPU      *GPU
 	Physical            bool
+	SMPercentage        int //100 for physical
 	mutex               sync.Mutex
 }
 
@@ -143,6 +144,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				IsProvisioned:       true,
 				Name:                name,
 				Physical:            true,
+				SMPercentage:        100,
 				ProvisionedGPU: &GPU{
 					UUID:                uuid,
 					Name:                name,
