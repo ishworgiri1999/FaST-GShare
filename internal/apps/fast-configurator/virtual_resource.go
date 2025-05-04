@@ -29,6 +29,26 @@ type VirtualGPU struct {
 	mutex               sync.Mutex
 }
 
+func (v *VirtualGPU) String() string {
+	return fmt.Sprintf(
+		"VirtualGPU{\n"+
+			"  Name: %s,\n"+
+			"  ID: %s,\n"+
+			"  DeviceIndex: %d,\n"+
+			"  MemoryBytes: %d,\n"+
+			"  MultiProcessorCount: %d,\n"+
+			"  IsProvisioned: %t,\n"+
+			"  Physical: %t,\n"+
+			"  PhysicalGPUType: %s,\n"+
+			"  SMPercentage: %d,\n"+
+			"  Mig: %v,\n"+
+			"  GPUInstance: %v,\n"+
+			"  ComputeInstance: %v,\n"+
+			"  ProvisionedGPU: %v,\n"+
+			"}",
+		v.Name, v.ID, v.DeviceIndex, v.MemoryBytes, v.MultiProcessorCount, v.IsProvisioned, v.Physical, v.PhysicalGPUType, v.SMPercentage, v.Mig, v.GPUInstance, v.ComputeInstance, v.ProvisionedGPU)
+}
+
 type MIGProperties struct {
 	GPUInstance     *nvml.GpuInstance
 	ComputeInstance *nvml.ComputeInstance

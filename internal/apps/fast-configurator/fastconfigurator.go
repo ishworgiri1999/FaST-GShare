@@ -10,9 +10,7 @@ package fastconfigurator
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -40,13 +38,6 @@ const (
 
 func Run(controllerManagerAddress string, mps bool) {
 	klog.Infof("Starting FaST-GShare configurator...")
-
-	// err := initFiles()
-
-	// if err != nil {
-	// 	klog.Fatalf("Error failed to initialize files: %v", err)
-	// 	return
-	// }
 
 	server, err := NewServer("5001")
 	if err != nil {
@@ -240,110 +231,6 @@ func Run(controllerManagerAddress string, mps bool) {
 	}
 }
 
-func RunOld(controllerManagerAddress string, mps bool) {
-	klog.Infof("Starting FaST-GShare configurator...")
-
-	server, err := NewServer("5001")
-	if err != nil {
-		klog.Fatalf("Error failed to create gRPC server: %v", err)
-		return
-	}
-	klog.Infof("gRPC server started on port 5001")
-
-	defer server.Stop()
-
-	manager, err := NewResourceManager()
-
-	if err != nil {
-		klog.Fatalf("Error failed to initialize ResourceManager: %v", err)
-		return
-	}
-
-	//filter out non-usable GPUs, mig parents are not usable
-	gpus := manager.getAvailableVirtualResources()
-
-	log.Printf("count of available GPUs: %d\n", len(manager.PhysicalGPUs))
-
-	if len(gpus) == 0 {
-		klog.Fatalf("No usable GPUs found.")
-		return
-	}
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	gcIpFile, err := os.Create(GPUClientsIPFile)
-	if err != nil {
-		klog.Errorf("Error Cannot create the GPUClientsIPFile = %s\n", GPUClientsIPFile)
-	}
-
-	st := os.Getenv(GPUClientsIPEnv) + "\n"
-	gcIpFile.WriteString(st)
-	gcIpFile.Sync()
-	gcIpFile.Close()
-	klog.Infof("Node Daemon, GPUClientsIP = %s.", st)
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		klog.Fatalf("Error Cannot get hostname. \n")
-		panic(err)
-	}
-
-	os.MkdirAll(FastSchedulerConfigDir, os.ModePerm)
-	os.MkdirAll(GPUClientsPortConfigDir, os.ModePerm)
-
-	klog.Infof("Trying to connet controller-manager....., server IP:Port = %s\n", controllerManagerAddress)
-	retryCount := 0
-	var conn net.Conn
-	for retryCount < MaxConnRetries {
-
-		conn, err = net.Dial("tcp", controllerManagerAddress)
-		if err != nil {
-			klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .", retryCount+1, MaxConnRetries, controllerManagerAddress, err)
-			klog.Errorf("Retrying in %d seconds...", RetryItv)
-			retryCount++
-			select {
-			case <-sigChan:
-				klog.Info("Received signal during connection attempt, aborting")
-				return
-			case <-time.After(RetryItv * time.Second):
-				continue
-			}
-
-		}
-		break
-	}
-	if retryCount+1 >= MaxConnRetries {
-		panic(err)
-	}
-
-	klog.Info("The connection to the device-controller-manager succeed.")
-	reader := bufio.NewReader(conn)
-	helloMessage := types.ConfiguratorNodeHelloMessage{
-		Hostname: hostname,
-	}
-	klog.Infof("Sending hello message to the device-controller-manager with hostname: %s\n", hostname)
-	b, err := types.EncodeToByte(helloMessage)
-
-	klog.Infof("The encoded hello message: %v\n %d", b, len(b))
-	if err != nil {
-		klog.Fatalf("Error failed to encode ConfiguratorNodeHelloMessage: %v", err)
-	}
-	writeMsgToConn(conn, b)
-
-	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
-	go sendNodeHeartbeats(conn, nodeHeartbeater.C, nil)
-
-	go func() {
-		<-sigChan
-		conn.Close()
-		klog.Infof("Received signal, shutting down fast-configurator")
-	}()
-
-	recvMsgAndWriteConfig(reader)
-
-}
-
 func writeMsgToConn(conn net.Conn, b []byte) error {
 	_, err := conn.Write(b)
 	if err != nil {
@@ -351,60 +238,6 @@ func writeMsgToConn(conn net.Conn, b []byte) error {
 		return err
 	}
 	return nil
-}
-
-// Deprecated
-func registerGPUDevices(conn net.Conn, gpus []*VirtualGPU) {
-
-	gpu_num := len(gpus)
-	var buf bytes.Buffer
-
-	var gpuinfo types.GPURegisterMessage = types.GPURegisterMessage{
-		GPU: make([]types.VirtualGPU, gpu_num),
-	}
-
-	for i := 0; i < gpu_num; i++ {
-
-		// uuid := gpus[i].UUID
-		// memsize := gpus[i].Memory
-		// oriGPUType := gpus[i].Name
-		// gpuTypeName := strings.Split(oriGPUType, " ")[1]
-
-		// uuidWithType := uuid + "_" + gpuTypeName
-		// buf.WriteString(uuidWithType + ":")
-		// buf.WriteString(strconv.FormatUint(memsize, 10))
-		// buf.WriteString(",")
-
-		var provisionedGPU *types.GPU
-
-		if gpus[i].ProvisionedGPU != nil {
-			provisionedGPU = &types.GPU{
-				UUID:     gpus[i].ProvisionedGPU.UUID,
-				TypeName: gpus[i].ProvisionedGPU.Name,
-				Memory:   gpus[i].ProvisionedGPU.MemoryBytes,
-			}
-
-			gpu := types.VirtualGPU{
-				MemoryBytes:         gpus[i].MemoryBytes,
-				MultiProcessorCount: gpus[i].MultiProcessorCount,
-				IsProvisioned:       gpus[i].IsProvisioned,
-				ProvisionedGPU:      provisionedGPU,
-			}
-
-			gpuinfo.GPU[i] = gpu
-		}
-
-	}
-
-	klog.Infof("Registering %d GPU devices.", gpu_num)
-
-	b, err := types.EncodeToByte(gpuinfo)
-	if err != nil {
-		klog.Fatalf("Error failed to encode GPURegisterMessage: %v", err)
-	}
-	klog.Infof("Sucessfully get GPU devices, <uuid>:<memory>,... = %s\n", buf.String())
-	conn.Write(b)
-
 }
 
 func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time, connectionClosed chan struct{}) {
