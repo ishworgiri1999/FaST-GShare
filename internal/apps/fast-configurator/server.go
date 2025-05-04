@@ -21,6 +21,7 @@ type ConfiguratorServer struct {
 type Server struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
+	manager    *ResourceManager
 }
 
 func NewServer(port string) (*Server, error) {
@@ -37,6 +38,7 @@ func NewServer(port string) (*Server, error) {
 	}
 
 	configServer, err := NewConfigurationServer(ConfigurationServerParams{})
+	server.manager = configServer.manager
 	if err != nil {
 		return nil, fmt.Errorf("failed to create configuration server: %w", err)
 	}
@@ -72,9 +74,18 @@ func NewConfigurationServer(params ConfigurationServerParams) (*ConfiguratorServ
 
 // Stop gracefully stops the gRPC server
 func (s *Server) Stop() {
+
 	if s.grpcServer != nil {
 		log.Println("Stopping gRPC server...")
 		s.grpcServer.GracefulStop()
 		log.Println("gRPC server stopped")
 	}
+
+	if s.manager != nil {
+		log.Println("Stopping resource manager...")
+		s.manager.CleanUp()
+		log.Println("Resource manager stopped")
+
+	}
+
 }

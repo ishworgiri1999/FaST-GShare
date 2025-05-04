@@ -82,13 +82,14 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 					Name:  "CUDA_MPS_LOG_DIRECTORY",
 					Value: "/tmp/mps_log",
 				},
-				corev1.EnvVar{
-					Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
-					Value: smPartition,
-				},
 			)
 			if params.MPSConfig.FastPodMPSConfig != nil {
+
 				ctn.Env = append(ctn.Env,
+					corev1.EnvVar{
+						Name:  "CUDA_MPS_ACTIVE_THREAD_PERCENTAGE",
+						Value: smPartition,
+					},
 					corev1.EnvVar{
 						// the scheduler IP is not necessary since the hooked containers get it from /fastpod/library/GPUClientsIP.txt
 						Name:  "SCHEDULER_IP",

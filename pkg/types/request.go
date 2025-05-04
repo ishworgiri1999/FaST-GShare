@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 type AllocationType string
 
 const (
@@ -10,12 +12,13 @@ const (
 )
 
 func GetAllocationType(allocationType string) AllocationType {
-	switch allocationType {
+	at := strings.ToUpper(allocationType)
+	switch at {
 	case "MPS":
 		return AllocationTypeMPS
-	case "FastPod":
+	case "FASTPOD":
 		return AllocationTypeFastPod
-	case "Exclusive":
+	case "EXCLUSIVE":
 		return AllocationTypeExclusive
 	default:
 		return AllocationTypeNone

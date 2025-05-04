@@ -90,6 +90,19 @@ func NewResourceManager() (*ResourceManager, error) {
 	return rm, nil
 }
 
+func (rm *ResourceManager) CleanUp() {
+	//clear all mps servers
+
+	for _, vGPU := range rm.provisionedGPUs {
+		if vGPU.ProvisionedGPU.mpsServer.isEnabled {
+			err := vGPU.ProvisionedGPU.mpsServer.StopMPSDaemon()
+			if err != nil {
+				log.Printf("cleanup:Warning: Failed to stop MPS daemon: %v", err)
+			}
+		}
+	}
+}
+
 // discoverVirtualResources creates virtual GPU resources based on physical GPU capabilities
 func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 	var gpus []*VirtualGPU

@@ -17,6 +17,7 @@ limitations under the License.
 package fastpodcontrollermanager
 
 import (
+	"container/list"
 	"fmt"
 	"log"
 	"strings"
@@ -97,6 +98,8 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 						Mem:            memBytes,
 						Usage:          0,
 						UsageMem:       0,
+						FastPodList:    list.New(),
+						MPSPodList:     list.New(),
 						allocationType: types.AllocationTypeNone,
 					}
 				}
@@ -112,6 +115,8 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 					Mem:            memBytes,
 					Usage:          0,
 					UsageMem:       0,
+					FastPodList:    list.New(),
+					MPSPodList:     list.New(),
 					allocationType: types.AllocationTypeNone,
 				}
 			}
@@ -228,7 +233,7 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 		return false
 	}
 	quota := req.FastPodRequirements.QuotaReq
-	return (1.0 - info.Usage) >= quota
+	return (1.0 - info.Usage) >= (quota / 100)
 }
 
 // scoreExclusive prefers GPUs whose SM‐count is just large enough

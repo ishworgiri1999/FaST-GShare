@@ -180,11 +180,12 @@ func (ctr *Controller) updatePodsGPUConfig(nodeName, uuid string, podlist *list.
 		for pod := podlist.Front(); pod != nil; pod = pod.Next() {
 			podRequest := pod.Value.(*FastPodReq)
 			podGPUConfigRequest.FastpodGpuConfigs = append(podGPUConfigRequest.FastpodGpuConfigs, &seti.FastPodGPUConfig{
-				Key:         podRequest.Key,
-				QtRequest:   podRequest.QtRequest,
-				QtLimit:     podRequest.QtLimit,
-				SmPartition: int64(podRequest.SMPartition),
-				Memory:      podRequest.Memory,
+				Key:           podRequest.Key,
+				QtRequest:     podRequest.QtRequest,
+				QtLimit:       podRequest.QtLimit,
+				SmPartition:   int64(podRequest.SMPartition),
+				Memory:        podRequest.Memory,
+				GpuClientPort: int32(podRequest.GPUClientPort),
 			})
 		}
 	}

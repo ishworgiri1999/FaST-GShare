@@ -170,6 +170,7 @@ func (ctr *Controller) gpuNodeInit() error {
 				Mem:         0,
 				Usage:       0.0,
 				UsageMem:    0,
+				MPSPodList:  list.New(),
 				FastPodList: list.New(),
 			}
 		}
@@ -534,7 +535,9 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 			Usage:          0.0,
 			UsageMem:       0,
 			FastPodList:    list.New(),
+			MPSPodList:     list.New(),
 		}
+		gpuInfo = node.vGPUID2GPU[physicalGPU.Uuid]
 	}
 	//rare case
 	if gpuInfo.allocationType != request.AllocationType {
@@ -616,7 +619,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		gpuInfo.UsageMem = newMemoryUsage
 
 		gpuInfo.FastPodList.PushBack(&FastPodReq{
-			Key:           podreq.Key,
+			Key:           podKey,
 			QtRequest:     request.FastPodRequirements.QuotaLimit,
 			QtLimit:       request.FastPodRequirements.QuotaLimit,
 			SMPartition:   request.FastPodRequirements.SMPartition,
@@ -634,7 +637,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 	fastPodMPSConfig = &FastPodMPSConfig{
 		SchedulerIP:            node.DaemonIP,
 		GpuClientPort:          port,
-		ActiveThreadPercentage: *&request.FastPodRequirements.SMPartition,
+		ActiveThreadPercentage: request.FastPodRequirements.SMPartition,
 	}
 
 	mpsConfig.FastPodMPSConfig = fastPodMPSConfig
@@ -704,7 +707,23 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 			klog.Infof("All pods removed from fastpod=%s, vGPU=%s.", fastpod.Name, vGPUID)
 
 			if (podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
+
+				//mps
+				if allocationType == types.AllocationTypeFastPod || allocationType == types.AllocationTypeMPS {
+
+					//try to disable mps
+					resp, err := node.grpcClient.DisableMPS(context.TODO(), gpuInfo.UUID)
+					if err != nil {
+						klog.Errorf("Error when disabling MPS for vGPU %s, err = %s", gpuInfo.UUID, err)
+					}
+					if resp.Success {
+						klog.Infof("Successfully disabled MPS for vGPU %s,.", gpuInfo.UUID)
+
+					}
+				}
+
 				// destroy the gpu if possible
+
 				if gpuInfo.virtual {
 					//removal of gpu
 					resp, err := node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{
@@ -806,6 +825,21 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 
 				if (podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
 					// destroy the gpu if possible
+					//disable mps
+
+					if allocationType == types.AllocationTypeFastPod || allocationType == types.AllocationTypeMPS {
+
+						//try to disable mps
+						resp, err := node.grpcClient.DisableMPS(context.TODO(), gpuInfo.UUID)
+						if err != nil {
+							klog.Errorf("Error when disabling MPS for vGPU %s, err = %s", gpuInfo.UUID, err)
+						}
+						if resp.Success {
+							klog.Infof("Successfully disabled MPS for vGPU %s,.", gpuInfo.UUID)
+
+						}
+					}
+
 					if gpuInfo.virtual {
 						//removal of gpu
 						resp, err := node.grpcClient.ReleaseVirtualGPU(context.TODO(), &seti.ReleaseVirtualGPURequest{

@@ -483,6 +483,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			ok, err := validatePodRequest(request)
 			if err != nil || !ok {
 				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Invalid pod request")
+				klog.Errorf("Error invalid pod request: %s", err)
 				//we dont care if the pod is invalid
 				return nil, nil
 			}
