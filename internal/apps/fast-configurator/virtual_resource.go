@@ -7,6 +7,7 @@ import (
 
 	"github.com/KontonGu/FaST-GShare/pkg/mig"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 // VirtualGPU represents a virtual GPU resource that exists logically
@@ -23,7 +24,8 @@ type VirtualGPU struct {
 	ComputeInstance     *mig.ComputeInstance
 	ProvisionedGPU      *GPU
 	Physical            bool
-	SMPercentage        int //100 for physical
+	PhysicalGPUType     string // Name of the physical GPU
+	SMPercentage        int    //100 for physical
 	mutex               sync.Mutex
 }
 
@@ -109,7 +111,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 	var gpus []*VirtualGPU
 	for i, device := range rm.PhysicalGPUs {
 
-		name, ret := device.GetName()
+		physicalGPUName, ret := device.GetName()
 		if ret != nvml.SUCCESS {
 			log.Printf("Warning: Could not get name for GPU %d: %v", i, ret)
 			continue
@@ -129,18 +131,18 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 		}
 
 		// Check MIG capability
-		_, currentMode, ret := device.GetMigMode()
+		currentMode, _, ret := device.GetMigMode()
 
 		if ret == nvml.ERROR_NOT_SUPPORTED || (ret == nvml.SUCCESS && currentMode != nvml.DEVICE_MIG_ENABLE) {
 			if ret == nvml.ERROR_NOT_SUPPORTED {
-				log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
+				log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, physicalGPUName)
 			} else {
-				log.Printf("MIG not enabled for GPU %d (%s). Creating a non-MIG virtual GPU.", i, name)
+				log.Printf("MIG not enabled for GPU %d (%s). Creating a non-MIG virtual GPU.", i, physicalGPUName)
 			}
 
-			smCount, err := GetSMCount(name)
+			smCount, err := GetSMCount(physicalGPUName)
 			if err != nil {
-				log.Printf("Warning: Could not get SM count for GPU %s: %v. Using default of 0.", name, err)
+				log.Printf("Warning: Could not get SM count for GPU %s: %v. Using default of 0.", physicalGPUName, err)
 				smCount = 0 // Default to a reasonable value for modern GPUs
 			}
 
@@ -155,19 +157,20 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				MultiProcessorCount: int(smCount),
 				Mig:                 nil,
 				IsProvisioned:       true,
-				Name:                name,
+				Name:                physicalGPUName,
 				Physical:            true,
 				SMPercentage:        100,
+				PhysicalGPUType:     physicalGPUName,
 				ProvisionedGPU: &GPU{
 					UUID:                uuid,
-					Name:                name,
+					Name:                physicalGPUName,
 					MemoryBytes:         memoo.Total,
 					MultiProcessorCount: int(smCount),
 					ParentDeviceIndex:   i,
 					ParentUUID:          uuid,
 					mpsServer: MPSServer{
 						UUID:      uuid,
-						Name:      name,
+						Name:      physicalGPUName,
 						isEnabled: false,
 					},
 					ProvisionedDevice: device.Device,
@@ -184,16 +187,18 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			continue
 		}
 
-		if currentMode != nvml.DEVICE_MIG_ENABLE {
-			log.Printf("Warning: MIG not enabled for GPU %d, skipping", i)
-			continue
-		}
+		// if currentMode != nvml.DEVICE_MIG_ENABLE {
+		// 	log.Printf("Warning: MIG not enabled for GPU %d, skipping", i)
+		// 	continue
+		// }
 
 		migCount, ret := device.GetMaxMigDeviceCount()
 		if ret != nvml.SUCCESS {
 			log.Printf("Warning: Could not get MIG device count for GPU %d: %v", i, ret)
 			continue
 		}
+
+		klog.Infof("MIG device count for GPU %d: %d", i, migCount)
 
 		for j := 0; j < migCount; j++ {
 			migDevice, ret := device.GetMigDeviceHandleByIndex(j)
@@ -273,8 +278,10 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 					profile:         profile,
 					ComputeInstance: &computeInstance,
 				},
-				IsProvisioned: true,
-				DeviceIndex:   i,
+				IsProvisioned:   true,
+				DeviceIndex:     i,
+				PhysicalGPUType: physicalGPUName,
+				SMPercentage:    int(atters.ComputeInstanceSliceCount) * 100 / int(migCount),
 				ProvisionedGPU: &GPU{
 					UUID:                migDeviceUUID,
 					Name:                migDeviceName,
@@ -303,6 +310,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 		// Create virtual GPUs for each profile
 		for _, profile := range profiles {
+
 			count, ret := device.GetGpuInstanceRemainingCapacity(profile)
 			if ret != nvml.SUCCESS {
 				log.Printf("Error getting GPU instance remaining capacity for profile %d on device %d: %v",
@@ -312,7 +320,9 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 			for j := 0; j < count; j++ {
 				vGPU := &VirtualGPU{
-					Name:                fmt.Sprintf("%s-mig-profile-%d", name, profile.Id),
+					PhysicalGPUType:     physicalGPUName,
+					SMPercentage:        int(profile.InstanceCount) * 100 / int(migCount),
+					Name:                fmt.Sprintf("%s-mig-profile-%d", physicalGPUName, profile.Id),
 					ID:                  fmt.Sprintf("vgpu-%d-profile%d-%d", i, profile.Id, j),
 					DeviceIndex:         i,
 					MemoryBytes:         profile.MemorySizeMB * 1024 * 1024,

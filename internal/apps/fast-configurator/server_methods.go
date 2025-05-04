@@ -45,6 +45,8 @@ func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
 		DeviceIndex:         int32(vgpu.DeviceIndex),
 		MultiprocessorCount: int32(vgpu.MultiProcessorCount),
 		IsProvisioned:       vgpu.IsProvisioned,
+		PhysicalGpuType:     vgpu.PhysicalGPUType,
+		SmPercentage:        int32(vgpu.SMPercentage),
 		ProvisionedGpu:      provisionedGPU,
 	}
 }
