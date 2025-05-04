@@ -46,8 +46,9 @@ type ResourceRequest struct {
 	RequestGPUUUID   *string
 	RequestedGPUType *string
 	//For mig
-	SMRequest *int
-	Memory    int64
+	SMRequest    *int
+	SMPercentage *int //0-100
+	Memory       int64
 
 	//for mps
 	FastPodRequirements *FastPodRequirements
@@ -198,6 +199,11 @@ func canFitExclusive(req *ResourceRequest, info *GPUDevInfo) bool {
 	if req.SMRequest != nil && info.smCount < *req.SMRequest {
 		return false
 	}
+	// SM percentage requirement (if any) — SMPercentage is a percentage
+	if req.SMPercentage != nil && info.SMPercentage < *req.SMPercentage {
+		return false
+	}
+
 	return true
 }
 
@@ -239,6 +245,19 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 // scoreExclusive prefers GPUs whose SM‐count is just large enough
 // and whose total RAM is minimal (to reduce waste).
 func scoreExclusive(req *ResourceRequest, info *GPUDevInfo) float64 {
+
+	if req.SMPercentage != nil {
+
+		percentageDiff := float64(info.SMPercentage - *req.SMPercentage)
+		// smaller difference → higher score
+		percentageScore := -percentageDiff
+		// smaller total RAM → higher score
+		memScore := -float64(info.Mem)
+		// weight SM more heavily
+		return percentageScore*1e6 + memScore
+
+	}
+
 	// Distance between GPU.SMCount and requested SM
 	smDiff := float64(info.smCount - *req.SMRequest)
 	// smaller difference → higher score

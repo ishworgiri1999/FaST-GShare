@@ -22,7 +22,8 @@ message VirtualGPU {
   int32 multiprocessor_count = 4;
   bool is_provisioned = 5;
   bool is_physical = 9;
-
+  string physical_gpu_name = 10;
+  int32 fraction = 11; //0-100 (for mig gpu) for other gpus it is 100
   optional GPU provisioned_gpu = 7;
 }
 
@@ -60,7 +61,6 @@ message RequestVirtualGPUResponse {
   optional GPU provisioned_gpu = 7;
 
   repeated VirtualGPU available_virtual_gpus = 8;
-
 }
 
 message GetHealthRequest {}
