@@ -39,7 +39,8 @@ func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
 	if vgpu.ProvisionedGPU != nil {
 		provisionedGPU = mapToSetiGPU(vgpu.ProvisionedGPU)
 	}
-	return &seti.VirtualGPU{
+
+	gpu := seti.VirtualGPU{
 		Id:                  vgpu.ID,
 		MemoryBytes:         vgpu.MemoryBytes,
 		DeviceIndex:         int32(vgpu.DeviceIndex),
@@ -49,6 +50,12 @@ func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
 		SmPercentage:        int32(vgpu.SMPercentage),
 		ProvisionedGpu:      provisionedGPU,
 	}
+
+	if vgpu.Mig != nil {
+		gpu.Profileid = &vgpu.Mig.profile.Id
+	}
+
+	return &gpu
 }
 
 // GetAvailableGPUs returns a list of available GPUs
@@ -180,7 +187,7 @@ func (s *ConfiguratorServer) ReleaseVirtualGPU(ctx context.Context, in *seti.Rel
 
 	}
 	// If provisioned using MIG, release resources
-	if err := vgpu.Release(); err != nil {
+	if err := s.manager.Release(vgpu); err != nil {
 		return &seti.ReleaseVirtualGPUResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to release virtual GPU: %v", err),

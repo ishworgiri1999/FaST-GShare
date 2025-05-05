@@ -20,8 +20,6 @@ type VirtualGPU struct {
 	MultiProcessorCount int
 	IsProvisioned       bool
 	Mig                 *MIGProperties
-	GPUInstance         *mig.GpuInstance
-	ComputeInstance     *mig.ComputeInstance
 	ProvisionedGPU      *GPU
 	Physical            bool
 	PhysicalGPUType     string // Name of the physical GPU
@@ -42,11 +40,9 @@ func (v *VirtualGPU) String() string {
 			"  PhysicalGPUType: %s,\n"+
 			"  SMPercentage: %d,\n"+
 			"  Mig: %v,\n"+
-			"  GPUInstance: %v,\n"+
-			"  ComputeInstance: %v,\n"+
 			"  ProvisionedGPU: %v,\n"+
 			"}",
-		v.Name, v.ID, v.DeviceIndex, v.MemoryBytes, v.MultiProcessorCount, v.IsProvisioned, v.Physical, v.PhysicalGPUType, v.SMPercentage, v.Mig, v.GPUInstance, v.ComputeInstance, v.ProvisionedGPU)
+		v.Name, v.ID, v.DeviceIndex, v.MemoryBytes, v.MultiProcessorCount, v.IsProvisioned, v.Physical, v.PhysicalGPUType, v.SMPercentage, v.Mig, v.ProvisionedGPU)
 }
 
 type MIGProperties struct {
@@ -109,7 +105,9 @@ func NewResourceManager() (*ResourceManager, error) {
 	// Initialize virtual resources
 	gpus := rm.getAvailableVirtualResources()
 	rm.VirtualGPUs = gpus
-
+	klog.Infof("Found %d virtual GPUs", len(gpus))
+	klog.Infof("Found %d physical GPUs", len(rm.PhysicalGPUs))
+	klog.Infof("Found %d provisioned GPUs", len(rm.provisionedGPUs))
 	return rm, nil
 }
 
@@ -122,6 +120,17 @@ func (rm *ResourceManager) CleanUp() {
 			if err != nil {
 				log.Printf("cleanup:Warning: Failed to stop MPS daemon: %v", err)
 			}
+		}
+	}
+
+	//destroy all virtual instances
+	for _, vGPU := range rm.provisionedGPUs {
+		if vGPU.IsProvisioned {
+			err := rm.Release(vGPU)
+			if err != nil {
+				log.Printf("cleanup:Warning: Failed to release virtual GPU: %v", err)
+			}
+			klog.Info("cleanup: Released virtual GPU: ", vGPU.ID)
 		}
 	}
 }
@@ -274,9 +283,24 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				log.Printf("Warning: Could not get GPU instance info for MIG device %d, index %d: %v", i, j, ret)
 				continue
 			}
-			profile, ret := device.GetGpuInstanceProfileInfo(int(info.ProfileId))
-			if ret != nvml.SUCCESS {
-				log.Printf("Warning: Could not get GPU instance profile info for MIG device %d, index %d: %v", i, j, ret)
+			var profile *nvml.GpuInstanceProfileInfo
+
+			profiles, err := device.GetPossiblGPUInstanceeProfiles()
+			if err != nil {
+				log.Printf("Warning: Could not get GPU instance profiles for MIG device %d, index %d: %v", i, j, err)
+				continue
+			}
+
+			for _, p := range profiles {
+				if p.Id == info.ProfileId {
+					profile = p
+					break
+				}
+
+			}
+
+			if profile == nil {
+				log.Printf("Warning: Could not find GPU instance profile for MIG device %d, index %d", i, j)
 				continue
 			}
 
@@ -295,7 +319,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				MemoryBytes:         migDeviceMemory.Total,
 				Mig: &MIGProperties{
 					GPUInstance:     &gpuInstance,
-					profile:         profile,
+					profile:         *profile,
 					ComputeInstance: &computeInstance,
 				},
 				IsProvisioned:   true,
@@ -317,6 +341,10 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 					},
 				},
 			}
+
+			if !ok {
+				rm.provisionedGPUs[migDeviceUUID] = vgpu
+			}
 			gpus = append(gpus, vgpu)
 
 		}
@@ -330,7 +358,8 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 		// Create virtual GPUs for each profile
 		for _, profile := range profiles {
-
+			klog.Info("profile id: ", profile.Id)
+			klog.Info("profile: ", profile)
 			count, ret := device.GetGpuInstanceRemainingCapacity(profile)
 			if ret != nvml.SUCCESS {
 				log.Printf("Error getting GPU instance remaining capacity for profile %d on device %d: %v",
@@ -387,7 +416,7 @@ func (rm *ResourceManager) FindVirtualGPU(profileID uint32) (*VirtualGPU, error)
 		}
 	}
 
-	return nil, fmt.Errorf("virtual GPU with prolfile id %s not found", profileID)
+	return nil, fmt.Errorf("virtual GPU with profile id %d not found", profileID)
 }
 
 func (rm *ResourceManager) FindVirtualGPUUsingUUID(uuid string) (*VirtualGPU, error) {
@@ -422,11 +451,12 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("failed to create GPU instance: %v", ret.String())
 	}
-	instance := rm.mig.GpuInstance(gpuInstance)
-	v.GPUInstance = &instance
+	v.Mig.GPUInstance = &gpuInstance
+
+	giMig := rm.mig.GpuInstance(gpuInstance)
 
 	// Select profile that uses all SMs in the GPU instance
-	ciProfile, err := instance.GetFullUsageComputeInstanceProfile(&v.Mig.profile)
+	ciProfile, err := giMig.GetFullUsageComputeInstanceProfile(&v.Mig.profile)
 
 	if err != nil {
 		// Cleanup on failure
@@ -446,9 +476,7 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 		return fmt.Errorf("failed to create compute instance: %v", err)
 	}
 
-	ci := rm.mig.ComputeInstance(computeInstance)
-
-	v.ComputeInstance = &ci
+	v.Mig.ComputeInstance = &computeInstance
 	v.IsProvisioned = true
 
 	ciInfo, ret := computeInstance.GetInfo()
@@ -508,14 +536,18 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 }
 
 // Release destroys the GPU instance and compute instance
-func (v *VirtualGPU) Release() error {
+func (rm *ResourceManager) Release(v *VirtualGPU) error {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
 
-	if !v.IsProvisioned {
+	if !v.IsProvisioned || v.Physical {
 		return nil // Nothing to do
 	}
 
+	if v.ProvisionedGPU == nil {
+		klog.Info("provisioned gpu is nil for vgpu: ", v.ID)
+		return nil
+	}
 	// if mps remove
 
 	err := v.ProvisionedGPU.mpsServer.StopMPSDaemon()
@@ -524,20 +556,26 @@ func (v *VirtualGPU) Release() error {
 	}
 
 	// Destroy compute instance first
-	if v.ComputeInstance != nil {
-		if ret := v.ComputeInstance.Destroy(); ret != nvml.SUCCESS {
+	if v.Mig.ComputeInstance != nil {
+		if ret := (*v.Mig.ComputeInstance).Destroy(); ret != nvml.SUCCESS {
 			return fmt.Errorf("failed to destroy compute instance: %v", ret)
 		}
-		v.ComputeInstance = nil
+		v.Mig.ComputeInstance = nil
+
+	} else {
+		klog.Info("compute instance is nil for vgpu: ", v.ID)
 	}
 
 	// Then destroy GPU instance
-	if v.GPUInstance != nil {
-		if ret := v.GPUInstance.Destroy(); ret != nvml.SUCCESS {
+	if v.Mig.GPUInstance != nil {
+		if ret := (*v.Mig.GPUInstance).Destroy(); ret != nvml.SUCCESS {
 			return fmt.Errorf("failed to destroy GPU instance: %v", ret)
 		}
-		v.GPUInstance = nil
+		v.Mig.GPUInstance = nil
+	} else {
+		klog.Info("gpu instance is nil for vgpu: ", v.ID)
 	}
+	rm.provisionedGPUs[v.ProvisionedGPU.UUID] = nil
 
 	v.IsProvisioned = false
 	v.ProvisionedGPU = nil

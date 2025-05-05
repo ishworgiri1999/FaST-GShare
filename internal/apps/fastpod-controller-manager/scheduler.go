@@ -20,9 +20,7 @@ import (
 	"container/list"
 	"fmt"
 	"log"
-	"strings"
 
-	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -60,7 +58,7 @@ type ScoredGPU struct {
 	Score float64
 }
 
-func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
+func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {
 		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
@@ -95,6 +93,7 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 				if !ok {
 					devInfo = &GPUDevInfo{
 						smCount:        int(vgpu.ProvisionedGpu.MultiprocessorCount),
+						SMPercentage:   int(vgpu.SmPercentage),
 						UUID:           uuid,
 						Mem:            memBytes,
 						Usage:          0,
@@ -112,6 +111,7 @@ func (ctr *Controller) FindBestNode(fastpod *fastpodv1.FaSTPod, req *ResourceReq
 				//fake device info, not to be inserted into the map
 				devInfo = &GPUDevInfo{
 					smCount:        int(vgpu.MultiprocessorCount),
+					SMPercentage:   int(vgpu.SmPercentage),
 					UUID:           uuid,
 					Mem:            memBytes,
 					Usage:          0,
@@ -174,6 +174,7 @@ func (ctr *Controller) selectBestCandidate(candidates []ScoredGPU) (*Node, *seti
 	}
 	bestCandidate := candidates[0]
 	for _, candidate := range candidates {
+		log.Printf("Candidate: %s, score: %f", candidate.VGPU.Id, candidate.Score)
 		if candidate.Score > bestCandidate.Score {
 			bestCandidate = candidate
 		}
@@ -184,6 +185,9 @@ func (ctr *Controller) selectBestCandidate(candidates []ScoredGPU) (*Node, *seti
 // canFitExclusive returns true if this GPU is completely free,
 // has at least the requested memory, and (if specified) has enough SMs.
 func canFitExclusive(req *ResourceRequest, info *GPUDevInfo) bool {
+
+	klog.Infof("request smpercentage: %d", *req.SMPercentage)
+	klog.Infof("info smpercentage: %d", info.SMPercentage)
 	if req.AllocationType != types.AllocationTypeExclusive {
 		return false
 	}
@@ -199,10 +203,13 @@ func canFitExclusive(req *ResourceRequest, info *GPUDevInfo) bool {
 	if req.SMRequest != nil && info.smCount < *req.SMRequest {
 		return false
 	}
+
 	// SM percentage requirement (if any) — SMPercentage is a percentage
 	if req.SMPercentage != nil && info.SMPercentage < *req.SMPercentage {
 		return false
 	}
+
+	klog.Infof("GPU %s is free and has enough memory and SMs", info.UUID)
 
 	return true
 }
@@ -289,63 +296,4 @@ func scoreFastPod(req *ResourceRequest, info *GPUDevInfo) float64 {
 	memUtil := float64(info.UsageMem) / float64(info.Mem)
 	smUtil := info.Usage
 	return reuseBonus + memUtil + smUtil
-}
-
-// deprecated: use FindBestNode instead
-func (ctr *Controller) schedule(fastpod *fastpodv1.FaSTPod, quotaReq float64, quotaLimit float64, smPartition int64, gpuMem int64, isValid bool, key string) (string, string) {
-	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
-	if err != nil {
-		errInfo := fmt.Errorf("Error Cannot find gpu node with the lable \"gpu:present\"")
-		utilruntime.HandleError(errInfo)
-	}
-	// fastpod.Annotations
-	// schedNode := "kgpu1"
-	schedNode := ""
-	var vgpuID string
-	prefereredGPU := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGSharePrefferedGPUType]
-	foundPreferred := false
-	nodesInfoMtx.Lock()
-	defer nodesInfoMtx.Unlock()
-
-	for _, node := range nodeList {
-		schedNode = node.Name
-		klog.Infof("current node name: %s.", schedNode)
-		//curently tmmporary use
-		klog.Infof("Prefered GPU: %s", prefereredGPU)
-
-		node := nodes[schedNode]
-
-		log.Printf("node %s has %d GPUs", schedNode, len(node.vGPUID2GPU))
-		for key, g := range node.vGPUID2GPU {
-			log.Printf("List GPU: %v", g)
-			if prefereredGPU != "" && strings.Contains(g.GPUType, prefereredGPU) {
-				vgpuID = key
-				foundPreferred = true
-				log.Printf("Selecting Preferred GPU %s", prefereredGPU)
-				break
-			} else {
-				vgpuID = key
-			}
-		}
-		if foundPreferred {
-			break
-		}
-
-	}
-
-	if prefereredGPU != "" && !foundPreferred {
-		log.Printf("Preferred GPU %s not found, cant schedule", prefereredGPU)
-		vgpuID = ""
-	}
-
-	log.Printf("Selected GPU id: %s", vgpuID)
-
-	if schedNode == "" {
-		klog.Infof("No enough resources for Pod of a FaSTPod=%s/%s", fastpod.ObjectMeta.Namespace, fastpod.ObjectMeta.Name)
-		ctr.pendingListMux.Lock()
-		ctr.pendingList.PushBack(key)
-		ctr.pendingListMux.Unlock()
-		return "", ""
-	}
-	return schedNode, vgpuID
 }

@@ -52,6 +52,14 @@ func Run(controllerManagerAddress string, mps bool) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Ensure server.Stop() is called on signal interrupt
+	go func() {
+		<-sigChan
+		klog.Infof("Received signal, shutting down")
+		server.Stop()
+		os.Exit(0)
+	}()
+
 	// Channel to receive connection closed notifications
 	connClosedChan := make(chan struct{})
 
@@ -72,7 +80,7 @@ func Run(controllerManagerAddress string, mps bool) {
 				select {
 				case <-sigChan:
 					klog.Info("Received signal during connection attempt, aborting")
-					return nil, nil, err
+					return nil, nil, fmt.Errorf("connection attempt aborted")
 				case <-time.After(RetryItv * time.Second):
 					continue
 				}
@@ -93,6 +101,7 @@ func Run(controllerManagerAddress string, mps bool) {
 	conn, reader, err := connectToController()
 	if err != nil {
 		klog.Fatalf("Failed to establish initial connection: %v", err)
+		server.Stop()
 		return
 	}
 
@@ -268,29 +277,26 @@ func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time, connectionClo
 	// Maximum number of failures before giving up
 	const maxConsecutiveFailures = 3
 
-	for {
-		select {
-		case <-heartTick:
-			klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
-			e := writeMsgToConn(conn, beat)
-			if e != nil {
-				consecutiveFailures++
-				klog.Errorf("Error failed to write heartbeat msg (%d/%d failures): %v",
-					consecutiveFailures, maxConsecutiveFailures, e)
+	for range heartTick {
+		klog.Infof("Send node heartbeat to fastpod-controller-manager: %s\n", time.Now().String())
+		e := writeMsgToConn(conn, beat)
+		if e != nil {
+			consecutiveFailures++
+			klog.Errorf("Error failed to write heartbeat msg (%d/%d failures): %v",
+				consecutiveFailures, maxConsecutiveFailures, e)
 
-				// Check if we should give up
-				if consecutiveFailures >= maxConsecutiveFailures {
-					klog.Errorf("Connection to controller-manager appears to be closed after %d failed attempts",
-						consecutiveFailures)
-					if connectionClosed != nil {
-						close(connectionClosed)
-					}
-					return
+			// Check if we should give up
+			if consecutiveFailures >= maxConsecutiveFailures {
+				klog.Errorf("Connection to controller-manager appears to be closed after %d failed attempts",
+					consecutiveFailures)
+				if connectionClosed != nil {
+					close(connectionClosed)
 				}
-			} else {
-				// Reset failure counter on successful send
-				consecutiveFailures = 0
+				return
 			}
+		} else {
+			// Reset failure counter on successful send
+			consecutiveFailures = 0
 		}
 	}
 }

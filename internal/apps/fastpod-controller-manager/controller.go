@@ -495,7 +495,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			klog.Infof("Request for pod with resource %v", request)
 
-			selectedNode, selectedGPU, err := ctr.FindBestNode(fastpod, request)
+			selectedNode, selectedGPU, err := ctr.FindBestNode(request)
 			if selectedNode == nil || selectedGPU == nil || err != nil {
 				klog.Infof("Error cannot find the best node for the fastpod %s. %s", key, err)
 				return nil, errors.New("NoSchedNodeAvailable")
@@ -585,8 +585,8 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// KONTON_TODO
 			(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = selectedGPU.ProvisionedGpu.Uuid
 
-			if allocation.MPSConfig.FastPodMPSConfig != nil {
-				(*fastpod.Status.GPUClientPort)[newpod.Name] = *&allocation.MPSConfig.FastPodMPSConfig.GpuClientPort
+			if allocation.MPSConfig != nil && allocation.MPSConfig.FastPodMPSConfig != nil {
+				(*fastpod.Status.GPUClientPort)[newpod.Name] = allocation.MPSConfig.FastPodMPSConfig.GpuClientPort
 			}
 			klog.Infof("Finished creating pod = %s.", subpodName)
 			return newpod, nil

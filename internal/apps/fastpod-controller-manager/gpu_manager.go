@@ -95,7 +95,6 @@ type Node struct {
 }
 
 var (
-	gpusUseCases map[string]string //mps, exclusive, fastpod
 	// record all fastpods and gpu information (allocation/available)
 	nodes        map[string]*Node = make(map[string]*Node)
 	nodesInfoMtx sync.Mutex
@@ -484,6 +483,19 @@ type Allocation struct {
 	MPSConfig *MPSConfig
 }
 
+func (a *Allocation) Undo() {
+	//todo:
+	//try undo allocation
+	nodesInfoMtx.Lock()
+	defer nodesInfoMtx.Unlock()
+	_, ok := a.node.vGPUID2GPU[a.UUID]
+	if !ok {
+		klog.Errorf("Error: The gpuInfo is not found, uuid = %s", a.UUID)
+		return
+	}
+
+}
+
 func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.VirtualGPU, request *ResourceRequest, podKey string) (*Allocation, int) {
 	nodesInfoMtx.Lock()
 	defer nodesInfoMtx.Unlock()
@@ -827,7 +839,7 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 					klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
 				}
 
-				if (podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
+				if (podlist != nil && podlist.Len() == 0 && allocationType != types.AllocationTypeExclusive) || allocationType == types.AllocationTypeExclusive {
 					// destroy the gpu if possible
 					//disable mps
 

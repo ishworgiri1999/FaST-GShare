@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/klog/v2"
 )
 
 type NewPodParams struct {
@@ -118,15 +119,20 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 				Name:      "fastpod-lib",
 				MountPath: FaSTPodLibraryDir,
 			},
-			corev1.VolumeMount{
-				Name:      "nvidia-mps-tmp",
-				MountPath: "/tmp/mps",
-			},
-			corev1.VolumeMount{
-				Name:      "nvidia-mps-tmp-log",
-				MountPath: "/tmp/mps_log",
-			},
 		)
+
+		if params.MPSConfig != nil {
+			ctn.VolumeMounts = append(ctn.VolumeMounts,
+				corev1.VolumeMount{
+					Name:      "nvidia-mps-tmp",
+					MountPath: "/tmp/mps",
+				},
+				corev1.VolumeMount{
+					Name:      "nvidia-mps-tmp-log",
+					MountPath: "/tmp/mps_log",
+				},
+			)
+		}
 		ctn.ImagePullPolicy = fastpod.Spec.PodSpec.Containers[0].ImagePullPolicy
 	}
 
@@ -139,23 +145,29 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 				},
 			},
 		},
-		corev1.Volume{
-			Name: "nvidia-mps-tmp",
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: params.MPSConfig.PipeDirectory,
-				},
-			},
-		},
-		corev1.Volume{
-			Name: "nvidia-mps-tmp-log",
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: params.MPSConfig.LogDirectory,
-				},
-			},
-		},
 	)
+
+	if params.MPSConfig != nil {
+		specCopy.Volumes = append(specCopy.Volumes,
+			corev1.Volume{
+				Name: "nvidia-mps-tmp",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: params.MPSConfig.PipeDirectory,
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "nvidia-mps-tmp-log",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: params.MPSConfig.LogDirectory,
+					},
+				},
+			},
+		)
+	}
+
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaRequest] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaLimit] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
 	annotationCopy[fastpodv1.FaSTGShareGPUMemory] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
@@ -255,6 +267,8 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 		if err1 != nil && err2 != nil {
 			return nil, fmt.Errorf("failed to parse SM value: %v", err1)
 		}
+
+		klog.Infof("SM value: %d, SM partition value: %d", smValueInt, smPartitionValue)
 
 		if smValueInt > 0 {
 			resourceRequest.SMRequest = &smValueInt

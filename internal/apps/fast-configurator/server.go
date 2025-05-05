@@ -74,7 +74,7 @@ func NewConfigurationServer(params ConfigurationServerParams) (*ConfiguratorServ
 
 // Stop gracefully stops the gRPC server
 func (s *Server) Stop() {
-
+	log.Println("Stopping manager...")
 	if s.grpcServer != nil {
 		log.Println("Stopping gRPC server...")
 		s.grpcServer.GracefulStop()
