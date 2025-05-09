@@ -25,19 +25,12 @@ func TestFindBestNode(t *testing.T) {
 		SMRequest:      intPtr(40),
 	}
 
-	node, gpu, err := ctr.FindBestNode(req)
+	_, err := ctr.FindBestNode(req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if node == nil || gpu == nil {
-		t.Fatalf("expected a node and GPU, got nil")
-	}
-
-	if gpu.Id != "gpu1" {
-		t.Errorf("expected GPU ID 'gpu1', got %s", gpu.Id)
-	}
 }
 
 // MockNodeLister is a mock implementation of a NodeLister

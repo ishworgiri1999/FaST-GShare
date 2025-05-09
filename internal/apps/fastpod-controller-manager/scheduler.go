@@ -19,7 +19,7 @@ package fastpodcontrollermanager
 import (
 	"container/list"
 	"fmt"
-	"log"
+	"math"
 
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
@@ -52,23 +52,57 @@ type ResourceRequest struct {
 	FastPodRequirements *FastPodRequirements
 }
 
-type ScoredGPU struct {
-	VGPU  *seti.VirtualGPU
-	Node  *Node
-	Score float64
+// Generalized canFit function
+func canFit(req *ResourceRequest, info *GPUDevInfo) bool {
+	switch req.AllocationType {
+	case types.AllocationTypeExclusive:
+		return canFitExclusive(req, info)
+	case types.AllocationTypeMPS:
+		return canFitMPSPod(req, info)
+	case types.AllocationTypeFastPod:
+		return req.FastPodRequirements != nil && canFitFastPod(req, info)
+	default:
+		return false
+	}
 }
 
-func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualGPU, error) {
+var tFlopsMap = map[string]float64{
+	"NVIDIA A10G": 100,
+	"NVIDIA H100": 815,
+}
+
+// TransformedSM stub: for now, just return the requested SM percentage
+func TransformedSM(req *ResourceRequest, vgpu *seti.VirtualGPU) (int, error) {
+	tflopSource, ok1 := tFlopsMap[vgpu.ProvisionedGpu.Name]
+	tflopTarget, ok2 := tFlopsMap[*req.RequestedGPUType]
+
+	if !ok1 || !ok2 {
+		return 0, fmt.Errorf("no tflop info for the gpu %s", vgpu.ProvisionedGpu.Name)
+	}
+
+	return int(math.Ceil(float64(*req.SMPercentage) * tflopSource / tflopTarget)), nil
+}
+
+type SelectionResult struct {
+	Node    *Node
+	VGPU    *seti.VirtualGPU
+	FinalSM int
+}
+
+func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, error) {
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {
 		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
 		utilruntime.HandleError(errInfo)
-		return nil, nil, errInfo
+		return nil, errInfo
 	}
 
 	klog.Infof("Nodelist count is: %d", len(nodeList))
 
-	var candidates []ScoredGPU
+	var bestNode *Node
+	var bestVGPU *seti.VirtualGPU
+	bestScore := 1e9 // Initialize to a large number
+	var finalSM float64
 
 	for _, n := range nodeList {
 		node, ok := nodes[n.Name]
@@ -76,8 +110,6 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualG
 			continue
 		}
 		allVGPU := node.vgpus
-
-		klog.Infof("scheduler: node %s has %d GPUs", n.Name, len(allVGPU))
 		usageMap := node.vGPUID2GPU
 
 		for _, vgpu := range allVGPU {
@@ -85,7 +117,6 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualG
 			var memBytes int64
 			var uuid string
 
-			// If provisioned, use usage data
 			if vgpu.IsProvisioned && vgpu.ProvisionedGpu != nil {
 				uuid = vgpu.ProvisionedGpu.Uuid
 				memBytes = int64(vgpu.ProvisionedGpu.MemoryBytes)
@@ -104,11 +135,8 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualG
 					}
 				}
 			} else {
-				// Unprovisioned GPU — treat as empty GPU
 				memBytes = int64(vgpu.MemoryBytes)
-				uuid = vgpu.Id // fallback ID
-
-				//fake device info, not to be inserted into the map
+				uuid = vgpu.Id
 				devInfo = &GPUDevInfo{
 					smCount:        int(vgpu.MultiprocessorCount),
 					SMPercentage:   int(vgpu.SmPercentage),
@@ -122,64 +150,80 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*Node, *seti.VirtualG
 				}
 			}
 
-			// If we couldn't get memory info, skip this GPU
 			if memBytes == 0 {
 				continue
 			}
 
-			// Apply optional filters (e.g., RequestedGPUType, RequestedGPUUUID)
-			// if req.RequestedGPUType != nil &&
-			// 	vgpu.ProvisionedGpu != nil &&
-			// 	*req.RequestedGPUType != vgpu.ProvisionedGpu.Name {
-			// 	continue
-			// }
+			// Step 10: if not CanFit(G, R) then continue
+			if !canFit(req, devInfo) {
+				continue
+			}
 
-			match := false
+			// Step 13: if R.gpu type != G.gpu type, adjust SMs
+			var adjSM int
+			var smRatio float64
+			if req.AllocationType == types.AllocationTypeMPS {
+				adjSM = 0
+				smRatio = 0.0
+			} else {
+				if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType != vgpu.ProvisionedGpu.Name {
+					adjSM, err = TransformedSM(req, vgpu)
+					if err != nil {
+						klog.Errorf("error TransformedSM: %s", err)
+						continue
+					}
+				} else if req.SMPercentage != nil {
+					adjSM = *req.SMPercentage
+				} else {
+					adjSM = 0
+				}
+				if devInfo.smCount > 0 {
+					smRatio = float64(adjSM) / float64(devInfo.smCount)
+				} else {
+					smRatio = 0.0
+				}
+			}
+
+			// Step 19: mem ratio = R.mem req / G.total memory
+			var memRatio float64
+			if devInfo.Mem > 0 {
+				memRatio = float64(req.Memory) / float64(devInfo.Mem)
+			} else {
+				memRatio = 0.0
+			}
+
+			// Step 20: priority = (R.allocation type == G.allocation type && R.allocation type != exclusive) ? 1 : 0
+			priority := 0.0
+			if req.AllocationType == devInfo.allocationType && req.AllocationType != types.AllocationTypeExclusive {
+				priority = 1.0
+			}
+
+			// Step 22-27: scoring
 			var score float64
-
-			switch req.AllocationType {
-			case types.AllocationTypeExclusive:
-				if canFitExclusive(req, devInfo) {
-					match = true
-					score = scoreExclusive(req, devInfo)
-				}
-
-			case types.AllocationTypeMPS:
-				if canFitMPSPod(req, devInfo) {
-					match = true
-					score = scoreMPSPod(req, devInfo)
-				}
-
-			case types.AllocationTypeFastPod:
-				if req.FastPodRequirements != nil &&
-					canFitFastPod(req, devInfo) {
-					match = true
-					score = scoreFastPod(req, devInfo)
-				}
+			if req.AllocationType == types.AllocationTypeMPS || smRatio <= memRatio {
+				// Mem-heavy: balance SMs (or always for MPS)
+				score = (devInfo.Usage - float64(adjSM)) / 100
+			} else {
+				// SM-heavy: balance memory
+				score = (float64((devInfo.Mem - devInfo.UsageMem) - req.Memory)) / float64(devInfo.Mem)
 			}
+			score = score - priority // higher priority → lower score
 
-			if match {
-				candidates = append(candidates, ScoredGPU{VGPU: vgpu, Node: node, Score: score})
+			if score < bestScore {
+				bestScore = score
+				bestNode = node
+				bestVGPU = vgpu
+				finalSM = float64(adjSM)
 			}
 		}
 	}
 
-	return ctr.selectBestCandidate(candidates)
-}
-
-func (ctr *Controller) selectBestCandidate(candidates []ScoredGPU) (*Node, *seti.VirtualGPU, error) {
-
-	if len(candidates) == 0 {
-		return nil, nil, fmt.Errorf("no suitable candidates found")
+	if bestNode != nil && bestVGPU != nil {
+		// Allocation logic would go here (not implemented)
+		klog.Infof("Selected GPU: %s on node %s with score %f and finalSM %f", bestVGPU.Id, bestNode.hostName, bestScore, finalSM)
+		return &SelectionResult{Node: bestNode, VGPU: bestVGPU, FinalSM: int(finalSM)}, nil
 	}
-	bestCandidate := candidates[0]
-	for _, candidate := range candidates {
-		log.Printf("Candidate: %s, score: %f", candidate.VGPU.Id, candidate.Score)
-		if candidate.Score > bestCandidate.Score {
-			bestCandidate = candidate
-		}
-	}
-	return bestCandidate.Node, bestCandidate.VGPU, nil
+	return nil, fmt.Errorf("no suitable candidates found")
 }
 
 // canFitExclusive returns true if this GPU is completely free,
@@ -237,6 +281,11 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 	if req.AllocationType != types.AllocationTypeFastPod {
 		return false
 	}
+
+	if req.FastPodRequirements == nil {
+		return false
+	}
+
 	allocOK := info.allocationType == types.AllocationTypeFastPod ||
 		info.allocationType == types.AllocationTypeNone
 	if !allocOK {
@@ -245,55 +294,9 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 	if (info.Mem - info.UsageMem) < req.Memory {
 		return false
 	}
-	quota := req.FastPodRequirements.QuotaReq
-	return (1.0 - info.Usage) >= (quota / 100)
-}
 
-// scoreExclusive prefers GPUs whose SM‐count is just large enough
-// and whose total RAM is minimal (to reduce waste).
-func scoreExclusive(req *ResourceRequest, info *GPUDevInfo) float64 {
+	// quota := req.FastPodRequirements.QuotaReq
+	sm_partition := req.FastPodRequirements.SMPartition
 
-	if req.SMPercentage != nil {
-
-		percentageDiff := float64(info.SMPercentage - *req.SMPercentage)
-		// smaller difference → higher score
-		percentageScore := -percentageDiff
-		// smaller total RAM → higher score
-		memScore := -float64(info.Mem)
-		// weight SM more heavily
-		return percentageScore*1e6 + memScore
-
-	}
-
-	// Distance between GPU.SMCount and requested SM
-	smDiff := float64(info.smCount - *req.SMRequest)
-	// smaller difference → higher score
-	smScore := -smDiff
-	// smaller total RAM → higher score
-	memScore := -float64(info.Mem)
-	// weight SM more heavily
-	return smScore*1e6 + memScore
-}
-
-// scoreMPSPod gives a bonus for reuse, otherwise ranks
-// unprovisioned GPUs by “SMs per byte of RAM” (higher is better).
-func scoreMPSPod(req *ResourceRequest, info *GPUDevInfo) float64 {
-	if info.allocationType == types.AllocationTypeMPS {
-		// reuse bonus + pack more memory‐utilization
-		return 2.0 + float64(info.UsageMem)/float64(info.Mem)
-	}
-	// unprovisioned: prefer GPUs with many SMs and small RAM
-	return float64(info.smCount) / float64(info.Mem)
-}
-
-// scoreFastPod gives a big bonus for FastPod reuse and then
-// favors high SM and mem utilization.
-func scoreFastPod(req *ResourceRequest, info *GPUDevInfo) float64 {
-	reuseBonus := 0.0
-	if info.allocationType == types.AllocationTypeFastPod {
-		reuseBonus = 3.0
-	}
-	memUtil := float64(info.UsageMem) / float64(info.Mem)
-	smUtil := info.Usage
-	return reuseBonus + memUtil + smUtil
+	return info.Usage+float64(sm_partition)/100.0 <= 1.0
 }

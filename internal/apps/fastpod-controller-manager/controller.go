@@ -495,13 +495,13 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			klog.Infof("Request for pod with resource %v", request)
 
-			selectedNode, selectedGPU, err := ctr.FindBestNode(request)
-			if selectedNode == nil || selectedGPU == nil || err != nil {
+			selectionResult, err := ctr.FindBestNode(request)
+			if selectionResult == nil || err != nil {
 				klog.Infof("Error cannot find the best node for the fastpod %s. %s", key, err)
 				return nil, errors.New("NoSchedNodeAvailable")
 			}
 
-			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectedNode.hostName, selectedGPU.Id)
+			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectionResult.Node.hostName, selectionResult.VGPU.Id)
 
 			// generate the pod key for the new pod of FaSTPod
 			var subpodName string
@@ -518,8 +518,10 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// gpuDevUUID, errCode = ctr.getGPUDevUUIDAndUpdateConfig(schedNode, schedvGPUID, quotaReq, quotaLimit, smPartition, gpuMem, podKey, &gpuClientPort)
 			// klog.Infof("The pod = %s of FaSTPod %s with vGPUID = %s is bound to device UUID=%s with GPUClientPort=%d.", podKey, key, schedvGPUID, gpuDevUUID, gpuClientPort)
 
-			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectedNode.hostName, selectedGPU, request, podKey)
+			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectionResult, request, podKey)
+			selectedNode := selectionResult.Node
 
+			selectedGPU := selectionResult.VGPU
 			// errCode 0: no error
 			// errCode 1: node with nodeName is not initialized
 			// errCode 2: vGPUID is not initialized or no DummyPod created;

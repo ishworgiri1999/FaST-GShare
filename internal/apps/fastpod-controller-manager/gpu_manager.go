@@ -496,19 +496,19 @@ func (a *Allocation) Undo() {
 
 }
 
-func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.VirtualGPU, request *ResourceRequest, podKey string) (*Allocation, int) {
+func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResult, request *ResourceRequest, podKey string) (*Allocation, int) {
 	nodesInfoMtx.Lock()
 	defer nodesInfoMtx.Unlock()
 
-	node, ok := nodes[nodeName]
+	node, ok := nodes[selectionResult.Node.hostName]
 	if !ok {
-		msg := fmt.Sprintf("Error The node = %s is not initialized", nodeName)
+		msg := fmt.Sprintf("Error The node = %s is not initialized", selectionResult.Node.hostName)
 		klog.Errorf(msg)
 		return nil, 2
 	}
 
 	//get gpu
-	physicalGPU := gpu.ProvisionedGpu
+	physicalGPU := selectionResult.VGPU.ProvisionedGpu
 
 	var mpsConfig *MPSConfig
 	var fastPodMPSConfig *FastPodMPSConfig
@@ -516,7 +516,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 	if physicalGPU == nil {
 		klog.Info("Error: The physical GPU is nil, CREATING NEW VGPU")
 		resp, err := node.grpcClient.RequestVirtualGPU(context.TODO(), &seti.RequestVirtualGPURequest{
-			Profileid: gpu.Profileid,
+			Profileid: selectionResult.VGPU.Profileid,
 			UseMps:    request.AllocationType == types.AllocationTypeFastPod || request.AllocationType == types.AllocationTypeMPS,
 		})
 
@@ -574,7 +574,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		if _, isFound := FindInQueue(podKey, gpuInfo.MPSPodList); !isFound {
 			newMemoryUsage := gpuInfo.UsageMem + request.Memory
 			if newMemoryUsage > gpuInfo.Mem {
-				klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough memory to pod %s, MemUsed=%d, MemReq=%d, MemTotal=%d.", gpuInfo.UUID, gpu.Id, podKey, gpuInfo.UsageMem, request.Memory, gpuInfo.Mem)
+				klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough memory to pod %s, MemUsed=%d, MemReq=%d, MemTotal=%d.", gpuInfo.UUID, selectionResult.VGPU.Id, podKey, gpuInfo.UsageMem, request.Memory, gpuInfo.Mem)
 				return nil, 4
 			}
 
@@ -603,12 +603,13 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		}, 0
 	}
 
+	gpu := selectionResult.VGPU
 	//handle fastpod case
 	if podreq, isFound := FindInQueue(podKey, gpuInfo.FastPodList); !isFound {
 
 		// newSMUsage := gpuInfo.Usage + quotaReq*(float64(smPartition)/100.0)
 		//Without TIME Quota
-		newSMUsage := gpuInfo.Usage + (float64(*&request.FastPodRequirements.SMPartition) / 100.0)
+		newSMUsage := gpuInfo.Usage + (float64(selectionResult.FinalSM) / 100.0)
 
 		if newSMUsage > 1.0 {
 			klog.Infof("Resource exceed! The gpu = %s with vgpu = %s can not allocate enough compute resource to pod %s, GPUAllocated=%f, GPUReq=%f.", gpuInfo.UUID, gpu.Id, podKey, gpuInfo.Usage, (float64(*request.SMRequest) / 100.0))
@@ -627,7 +628,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		if newPort != -1 {
 			port = newPort + GPUClientPortStart
 		} else {
-			klog.Errorf("Error the ports for gpu clients are full. node=%s.", nodeName)
+			klog.Errorf("Error the ports for gpu clients are full. node=%s.", selectionResult.Node.hostName)
 			return nil, 5
 		}
 
@@ -636,9 +637,9 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 
 		gpuInfo.FastPodList.PushBack(&FastPodReq{
 			Key:           podKey,
-			QtRequest:     request.FastPodRequirements.QuotaLimit,
+			QtRequest:     request.FastPodRequirements.QuotaReq,
 			QtLimit:       request.FastPodRequirements.QuotaLimit,
-			SMPartition:   request.FastPodRequirements.SMPartition,
+			SMPartition:   selectionResult.FinalSM,
 			Memory:        request.Memory,
 			GPUClientPort: port,
 		})
@@ -647,7 +648,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(nodeName string, gpu *seti.Virt
 		port = podreq.GPUClientPort
 	}
 	if request.AllocationType == types.AllocationTypeFastPod {
-		ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, gpuInfo.FastPodList)
+		ctr.updatePodsGPUConfig(selectionResult.Node.hostName, gpuInfo.UUID, gpuInfo.FastPodList)
 	}
 
 	fastPodMPSConfig = &FastPodMPSConfig{
