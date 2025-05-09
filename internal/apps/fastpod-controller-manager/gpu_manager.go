@@ -572,10 +572,15 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResul
 	}
 
 	// record the physical gpu for the fastpod
-	if _, ok := fastPodToPhysicalGPUs[podKey]; !ok {
-		fastPodToPhysicalGPUs[podKey] = make(map[string]bool)
+	if _, ok := fastPodToPhysicalGPUs[selectionResult.fastPodKey]; !ok {
+		fastPodToPhysicalGPUs[selectionResult.fastPodKey] = make(map[string]bool)
+		klog.Info("added pod to fastPodToPhysicalGPUs")
 	}
-	fastPodToPhysicalGPUs[podKey][physicalGPU.ParentUuid] = true
+	fastPodToPhysicalGPUs[selectionResult.fastPodKey][physicalGPU.ParentUuid] = true
+
+	klog.Infof("KONTON_TEST: fastPodToPhysicalGPUs = %v", fastPodToPhysicalGPUs)
+
+	klog.Infof("KONTON_TEST: podKey = %s, physicalGPU = %s", selectionResult.fastPodKey, physicalGPU.ParentUuid)
 
 	port := 0
 
@@ -749,7 +754,6 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 					}
 				}
 				podKey := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
-				fastPodToPhysicalGPUs[podKey][gpuInfo.ParentUUID] = false
 				// destroy the gpu if possible
 
 				if gpuInfo.virtual {
@@ -768,6 +772,8 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 
 					}
 				}
+
+				delete(fastPodToPhysicalGPUs[podKey], gpuInfo.ParentUUID)
 				delete(node.vGPUID2GPU, vGPUID)
 
 			}
@@ -891,6 +897,7 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 				err := ctr.kubeClient.CoreV1().Pods(namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 				if err != nil {
 					klog.Errorf("Error when Removing the pod = %s of the FaSTPod = %s", key, fastpod.Name)
+					klog.Errorf("Error = %s", err)
 				} else {
 					klog.Infof("Finish removing the pod = %s of the FaSTPod = %s (kube delete).", key, fastpod.Name)
 				}

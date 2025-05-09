@@ -6,11 +6,12 @@ metadata:
   annotations: 
     fastgshare/gpu_quota_request: "0.7"
     fastgshare/gpu_quota_limit: "0.8"
-    fastgshare/gpu_sm_partition: "50"
-    fastgshare/gpu_mem: "2700000000"
-    fastgshare/preferred_gpu_type: "A100"
+    fastgshare/gpu_sm_partition: "14"
+    fastgshare/sm_count: "12"
+    fastgshare/gpu_mem: "1000000000"
+    fastgshare/allocation_type: "FASTPOD"
 spec:
-  replicas: 1
+  replicas: 7
   podSpec:
     containers:
     - name: resnet-pytorch
@@ -22,7 +23,7 @@ spec:
       
       ports:
       - containerPort: 5000
-        hostPort: 5000
+        # hostPort: 5000
       volumeMounts:
         - name: "model-volume"
           mountPath: "/models/"

@@ -85,12 +85,18 @@ func TransformedSM(req *ResourceRequest, vgpu *seti.VirtualGPU) (int, error) {
 }
 
 type SelectionResult struct {
-	Node    *Node
-	VGPU    *seti.VirtualGPU
-	FinalSM int
+	fastPodKey string
+	Node       *Node
+	VGPU       *seti.VirtualGPU
+	FinalSM    int
 }
 
 func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, error) {
+
+	nodesInfoMtx.Lock()
+
+	defer nodesInfoMtx.Unlock()
+
 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
 	if err != nil {
 		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
@@ -107,7 +113,12 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 
 	for _, n := range nodeList {
 		node, ok := nodes[n.Name]
+
 		if !ok {
+			continue
+		}
+		//check if live
+		if n, ok := nodesLiveness[n.Name]; ok && n.Status != NodeReady {
 			continue
 		}
 		allVGPU := node.vgpus
@@ -155,8 +166,11 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 				continue
 			}
 
+			klog.Infof("KONTON_TEST: gpu used sm usage = %f", devInfo.Usage)
+
 			// Step 10: if not CanFit(G, R) then continue
 			if !canFit(req, devInfo) {
+				klog.Infof("KONTON_TEST: gpu cannot fit %f %f", devInfo.Usage, devInfo.UsageMem)
 				continue
 			}
 
@@ -196,9 +210,16 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 			// Affinity priority
 			affinity_priority := 0.0
 			gpuSet, ok := fastPodToPhysicalGPUs[req.podKey]
+			klog.Infof("KONTON_TEST: gpuSet = %v", gpuSet)
+
 			if ok && gpuSet[vgpu.ProvisionedGpu.ParentUuid] {
+				klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
+
 				affinity_priority = 10.0
+			} else {
+				klog.Info("No affinity priority")
 			}
+			klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
 
 			// Mode priority
 			mode_priority := 0.0
@@ -223,6 +244,8 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 			}
 			score = score - affinity_priority - mode_priority - gpu_priority
 
+			klog.Infof("score for gpu %s , with parent %s is %f", vgpu.Id, vgpu.ProvisionedGpu.ParentUuid, score)
+
 			if score < bestScore {
 				bestScore = score
 				bestNode = node
@@ -235,7 +258,7 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 	if bestNode != nil && bestVGPU != nil {
 		// Allocation logic would go here (not implemented)
 		klog.Infof("Selected GPU: %s on node %s with score %f and finalSM %f", bestVGPU.Id, bestNode.hostName, bestScore, finalSM)
-		return &SelectionResult{Node: bestNode, VGPU: bestVGPU, FinalSM: int(finalSM)}, nil
+		return &SelectionResult{fastPodKey: req.podKey, Node: bestNode, VGPU: bestVGPU, FinalSM: int(finalSM)}, nil
 	}
 	return nil, fmt.Errorf("no suitable candidates found")
 }
@@ -306,11 +329,21 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 		return false
 	}
 	if (info.Mem - info.UsageMem) < req.Memory {
+		klog.Infof("KONTON_TEST: gpu used mem = %d", info.UsageMem)
+		klog.Infof("KONTON_TEST: gpu remaining mem = %d", info.Mem-info.UsageMem)
 		return false
 	}
 
 	// quota := req.FastPodRequirements.QuotaReq
 	sm_partition := req.FastPodRequirements.SMPartition
 
-	return info.Usage+float64(sm_partition)/100.0 <= 1.0
+	totalUsage := info.Usage + float64(sm_partition)/100.0
+
+	if totalUsage > 1.0 {
+		klog.Infof("KONTON_TEST: gpu requested sm = %d", sm_partition)
+		klog.Infof("KONTON_TEST: gpu remaining sm = %d", info.Usage)
+		return false
+	}
+
+	return true
 }

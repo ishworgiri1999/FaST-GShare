@@ -198,8 +198,9 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 }
 
 func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) {
+
 	resourceRequest := &ResourceRequest{
-		podKey: fmt.Sprintf("%s/%s", fastpod.ObjectMeta.Namespace, fastpod.ObjectMeta.Name),
+		podKey: fmt.Sprintf("%s/%s", fastpod.Namespace, fastpod.Name),
 	}
 	var fastPodRequirements *FastPodRequirements
 
@@ -257,6 +258,7 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 		}
 
 		resourceRequest.FastPodRequirements = fastPodRequirements
+		resourceRequest.SMPercentage = &smPartitionValue
 
 	}
 

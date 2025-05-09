@@ -475,7 +475,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 		klog.Infof("Not enough replicas for the FaSTPod ..., spec need %d replicas, try to create %d replicas", *fastpodCopy.Spec.Replicas, diff)
 		successedNum, err := slowStartbatch(diff, k8scontroller.SlowStartInitialBatchSize, func() (*corev1.Pod, error) {
 
-			request, err := getPodRequestFromPod(fastpod)
+			request, err := getPodRequestFromPod(fastpodCopy)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get pod request from fastpod: %v", err)
 			}
@@ -520,6 +520,9 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectionResult, request, podKey)
 			selectedNode := selectionResult.Node
+
+			klog.Infof("KONTON_TEST: allocation = %v", allocation)
+			klog.Infof("KONTON_TEST: gpu used sm = %d", selectionResult.FinalSM)
 
 			selectedGPU := selectionResult.VGPU
 			// errCode 0: no error
