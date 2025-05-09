@@ -198,7 +198,9 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 }
 
 func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) {
-	resourceRequest := &ResourceRequest{}
+	resourceRequest := &ResourceRequest{
+		podKey: fmt.Sprintf("%s/%s", fastpod.ObjectMeta.Namespace, fastpod.ObjectMeta.Name),
+	}
 	var fastPodRequirements *FastPodRequirements
 
 	quota := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]

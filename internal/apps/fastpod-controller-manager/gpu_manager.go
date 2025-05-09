@@ -63,8 +63,8 @@ type GPUDevInfo struct {
 	UUID           string
 	Mem            int64
 	Name           string // could be different than GPUType or same
-
-	SMPercentage int // 0-100 // 100 for physical GPU . for mig gpu, it is the percentage of SMs.
+	ParentUUID     string // physical gpu uuid (different for mig gpu, same for physical gpu)
+	SMPercentage   int    // 0-100 // 100 for physical GPU . for mig gpu, it is the percentage of SMs.
 
 	// Usage of GPU resource, SM * QtRequest only for FastPod
 	Usage float64
@@ -101,6 +101,8 @@ var (
 	// mapping from fastpod name to its corresponding pod list;
 	fstp2Pods    map[string]*list.List = make(map[string]*list.List)
 	fstp2PodsMtx sync.Mutex
+
+	fastPodToPhysicalGPUs map[string](map[string]bool) = make(map[string](map[string]bool))
 )
 
 var Quantity1 = resource.MustParse("1")
@@ -158,6 +160,7 @@ func (ctr *Controller) gpuNodeInit() error {
 			node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
 				GPUType:     gpuType,
 				UUID:        gpuUuid,
+				ParentUUID:  gpuUuid,
 				Mem:         0,
 				Usage:       0.0,
 				UsageMem:    0,
@@ -165,11 +168,11 @@ func (ctr *Controller) gpuNodeInit() error {
 			}
 			nodes[dpod.Spec.NodeName] = node
 		} else {
-			// The node already has information in nodesInfo, meaning at least one GPU's dummyPod have been initialized;
 			// considering the scenario of multiple gpus in a node, initialize this dummyPod's physical gpu in the nodesInfo.
 			node.vGPUID2GPU[vgpuID] = &GPUDevInfo{
 				GPUType:     gpuType,
 				UUID:        gpuUuid,
+				ParentUUID:  gpuUuid,
 				Mem:         0,
 				Usage:       0.0,
 				UsageMem:    0,
@@ -546,6 +549,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResul
 			smCount:        int(physicalGPU.MultiprocessorCount),
 			allocationType: request.AllocationType,
 			UUID:           physicalGPU.Uuid,
+			ParentUUID:     physicalGPU.ParentUuid,
 			GPUType:        physicalGPU.Name,
 			Mem:            int64(physicalGPU.MemoryBytes),
 			Usage:          0.0,
@@ -566,6 +570,12 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResul
 			PipeDirectory: physicalGPU.MpsConfig.TmpPath,
 		}
 	}
+
+	// record the physical gpu for the fastpod
+	if _, ok := fastPodToPhysicalGPUs[podKey]; !ok {
+		fastPodToPhysicalGPUs[podKey] = make(map[string]bool)
+	}
+	fastPodToPhysicalGPUs[podKey][physicalGPU.ParentUuid] = true
 
 	port := 0
 
@@ -738,7 +748,8 @@ func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1
 
 					}
 				}
-
+				podKey := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
+				fastPodToPhysicalGPUs[podKey][gpuInfo.ParentUUID] = false
 				// destroy the gpu if possible
 
 				if gpuInfo.virtual {

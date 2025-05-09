@@ -38,6 +38,7 @@ type FastPodRequirements struct {
 }
 
 type ResourceRequest struct {
+	podKey         string
 	AllocationType types.AllocationType
 
 	RequestedNode    *string
@@ -192,10 +193,23 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 				memRatio = 0.0
 			}
 
-			// Step 20: priority = (R.allocation type == G.allocation type && R.allocation type != exclusive) ? 1 : 0
-			priority := 0.0
+			// Affinity priority
+			affinity_priority := 0.0
+			gpuSet, ok := fastPodToPhysicalGPUs[req.podKey]
+			if ok && gpuSet[vgpu.ProvisionedGpu.ParentUuid] {
+				affinity_priority = 10.0
+			}
+
+			// Mode priority
+			mode_priority := 0.0
 			if req.AllocationType == devInfo.allocationType && req.AllocationType != types.AllocationTypeExclusive {
-				priority = 1.0
+				mode_priority = 3.0
+			}
+
+			// GPU priority
+			gpu_priority := 0.0
+			if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType == vgpu.ProvisionedGpu.Name {
+				gpu_priority = 1.0
 			}
 
 			// Step 22-27: scoring
@@ -207,7 +221,7 @@ func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, err
 				// SM-heavy: balance memory
 				score = (float64((devInfo.Mem - devInfo.UsageMem) - req.Memory)) / float64(devInfo.Mem)
 			}
-			score = score - priority // higher priority → lower score
+			score = score - affinity_priority - mode_priority - gpu_priority
 
 			if score < bestScore {
 				bestScore = score
