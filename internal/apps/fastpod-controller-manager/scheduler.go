@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
-	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"

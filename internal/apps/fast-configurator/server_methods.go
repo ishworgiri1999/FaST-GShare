@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
-	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 )
 
 // Mapper function: normal GPU to seti.GPU

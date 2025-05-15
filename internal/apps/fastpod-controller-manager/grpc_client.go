@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	// Replace with your package name
-	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
+	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
+	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"

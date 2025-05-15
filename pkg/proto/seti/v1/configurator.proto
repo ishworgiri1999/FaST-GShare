@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package seti.v1;
 
-option go_package = "github.com/KontonGu/FaST-GShare/proto/seti/v1;seti";
+option go_package = "github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1;seti";
 
 // Empty request for getting available GPUs
 message GetAvailableGPUsRequest {}

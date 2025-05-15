@@ -25,8 +25,8 @@ import (
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
+	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
-	"github.com/KontonGu/FaST-GShare/proto/seti/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"

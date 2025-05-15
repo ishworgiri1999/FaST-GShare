@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             (unknown)
-// source: proto/seti/v1/configurator.proto
+// source: pkg/proto/seti/v1/configurator.proto
 
 package seti
 
@@ -356,5 +356,5 @@ var GPUConfiguratorService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/seti/v1/configurator.proto",
+	Metadata: "pkg/proto/seti/v1/configurator.proto",
 }
