@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
+	grpcclient "github.com/KontonGu/FaST-GShare/pkg/grpc"
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
@@ -90,7 +91,7 @@ type Node struct {
 	DaemonPortAlloc *bitmap.Bitmap
 
 	vgpus      []*seti.VirtualGPU
-	grpcClient *GrpcClient
+	grpcClient *grpcclient.GrpcClient
 	hostName   string
 }
 

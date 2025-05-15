@@ -1,4 +1,4 @@
-package fastpodcontrollermanager
+package grpcclient
 
 import (
 	"context"

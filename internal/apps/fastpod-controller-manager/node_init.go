@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	grpcclient "github.com/KontonGu/FaST-GShare/pkg/grpc"
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,7 +71,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 
 	klog.Infof("Received hostname from node information: %s", helloMessage.Hostname)
 
-	client := NewGrpcClient()
+	client := grpcclient.NewGrpcClient()
 
 	err = client.Connect(nodeIP, helloMessage.GrpcPort)
 	if err != nil {
