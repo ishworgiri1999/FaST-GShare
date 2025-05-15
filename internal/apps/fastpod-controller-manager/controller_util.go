@@ -353,8 +353,14 @@ func FindInQueue(key string, pl *list.List) (*FastPodReq, bool) {
 }
 
 func makeLabels(fastpod *fastpodv1.FaSTPod) map[string]string {
+
+	//fastfunction could be different from fastpod name
+	funcname, found := fastpod.Labels["fast_function"]
+	if !found {
+		funcname = fastpod.ObjectMeta.Name
+	}
 	labels := map[string]string{
-		"fast_function": fastpod.Name,
+		"fast_function": funcname,
 		"app":           fastpod.Name,
 		"controller":    fastpod.Name,
 	}
