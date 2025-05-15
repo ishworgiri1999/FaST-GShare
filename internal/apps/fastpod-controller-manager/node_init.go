@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	grpcclient "github.com/KontonGu/FaST-GShare/pkg/grpc"
+	"github.com/KontonGu/FaST-GShare/pkg/grpcclient"
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

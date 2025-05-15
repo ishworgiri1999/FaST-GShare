@@ -24,7 +24,8 @@ import (
 	"sync"
 
 	fastpodv1 "github.com/KontonGu/FaST-GShare/pkg/apis/fastgshare.caps.in.tum/v1"
-	grpcclient "github.com/KontonGu/FaST-GShare/pkg/grpc"
+	"github.com/KontonGu/FaST-GShare/pkg/grpcclient"
+
 	"github.com/KontonGu/FaST-GShare/pkg/libs/bitmap"
 	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
