@@ -10,7 +10,6 @@ package fastconfigurator
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -36,7 +35,114 @@ const (
 	RetryItv                = 10
 )
 
-func Run(controllerManagerAddress string, mps bool) {
+func maintainConnection(
+	name string,
+	address string,
+	helloMsg types.ConfiguratorNodeHelloMessage,
+	sigChan <-chan os.Signal,
+	handleMsgFunc func(*bufio.Reader),
+) {
+	for {
+		klog.Infof("[%s] Attempting to connect to %s", name, address)
+		var conn net.Conn
+		var reader *bufio.Reader
+		var err error
+		for {
+			select {
+			case <-sigChan:
+				klog.Infof("[%s] Received signal during connection attempt, aborting goroutine", name)
+				return
+			default:
+			}
+			conn, err = net.Dial("tcp", address)
+			if err != nil {
+				klog.Errorf("[%s] Connection failed: %v. Retrying in %d seconds...", name, err, RetryItv)
+				time.Sleep(RetryItv * time.Second)
+				continue
+			}
+			reader = bufio.NewReader(conn)
+			break
+		}
+
+		// Send hello message
+		b, err := types.EncodeToByte(helloMsg)
+		if err != nil {
+			klog.Errorf("[%s] Failed to encode hello message: %v", name, err)
+			conn.Close()
+			continue
+		}
+		_, err = conn.Write(b)
+		if err != nil {
+			klog.Errorf("[%s] Failed to send hello message: %v", name, err)
+			conn.Close()
+			continue
+		}
+
+		// Wait for ack
+		ackMsg, err := reader.ReadBytes('\n')
+		if err != nil {
+			klog.Errorf("[%s] Failed to read ack: %v", name, err)
+			conn.Close()
+			continue
+		}
+		var ack types.ConfiguratorNodeAckMessage
+		err = types.DecodeFromByte(ackMsg, &ack)
+		if err != nil || !ack.Ok {
+			klog.Errorf("[%s] Invalid ack: %v", name, err)
+			conn.Close()
+			continue
+		}
+		klog.Infof("[%s] Connection established and ack received.", name)
+
+		// Start heartbeat
+		heartTicker := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
+		heartbeat := types.ConfiguratorHeartbeatMessage{Alive: true}
+		beat, _ := types.EncodeToByte(heartbeat)
+		heartbeatFailures := 0
+		const maxHeartbeatFailures = 3
+
+		// Start message handler if provided
+		done := make(chan struct{})
+		if handleMsgFunc != nil {
+			go func() {
+				handleMsgFunc(reader)
+				close(done)
+			}()
+		}
+
+		// Heartbeat loop
+	heartbeatLoop:
+		for {
+			select {
+			case <-sigChan:
+				klog.Infof("[%s] Received signal, closing connection", name)
+				conn.Close()
+				return
+			case <-done:
+				klog.Warningf("[%s] Message handler exited, closing connection", name)
+				conn.Close()
+				break heartbeatLoop
+			case <-heartTicker.C:
+				err := writeMsgToConn(conn, beat)
+				if err != nil {
+					heartbeatFailures++
+					klog.Errorf("[%s] Heartbeat failed (%d/%d): %v", name, heartbeatFailures, maxHeartbeatFailures, err)
+					if heartbeatFailures >= maxHeartbeatFailures {
+						klog.Errorf("[%s] Too many heartbeat failures, reconnecting...", name)
+						conn.Close()
+						break heartbeatLoop
+					}
+				} else {
+					heartbeatFailures = 0
+				}
+			}
+		}
+		heartTicker.Stop()
+		// Loop will retry connection
+	}
+}
+
+func Run(controllerManagerAddress string, fastFuncControllerAddress string, mps bool) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
 	server, err := NewServer("5001")
@@ -45,65 +151,11 @@ func Run(controllerManagerAddress string, mps bool) {
 		return
 	}
 	klog.Infof("gRPC server started on port 5001")
-
 	defer server.Stop()
 
 	// Setup signal handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Ensure server.Stop() is called on signal interrupt
-	go func() {
-		<-sigChan
-		klog.Infof("Received signal, shutting down")
-		server.Stop()
-		os.Exit(0)
-	}()
-
-	// Channel to receive connection closed notifications
-	connClosedChan := make(chan struct{})
-
-	// Connection establishment function that can be called for both initial connection and reconnection
-	connectToController := func() (net.Conn, *bufio.Reader, error) {
-		klog.Infof("Trying to connect to controller-manager....., server IP:Port = %s\n", controllerManagerAddress)
-		retryCount := 0
-		var conn net.Conn
-		var err error
-
-		for retryCount < MaxConnRetries {
-			conn, err = net.Dial("tcp", controllerManagerAddress)
-			if err != nil {
-				klog.Errorf("Error Failed to connect (attempt %d/%d) the device-controller-manager, IP:Port = %s, : %v .",
-					retryCount+1, MaxConnRetries, controllerManagerAddress, err)
-				klog.Errorf("Retrying in %d seconds...", RetryItv)
-				retryCount++
-				select {
-				case <-sigChan:
-					klog.Info("Received signal during connection attempt, aborting")
-					return nil, nil, fmt.Errorf("connection attempt aborted")
-				case <-time.After(RetryItv * time.Second):
-					continue
-				}
-			}
-			break
-		}
-
-		if retryCount+1 >= MaxConnRetries {
-			return nil, nil, fmt.Errorf("maximum connection retries exceeded")
-		}
-
-		// Connection established
-		reader := bufio.NewReader(conn)
-		return conn, reader, nil
-	}
-
-	// Initial connection
-	conn, reader, err := connectToController()
-	if err != nil {
-		klog.Fatalf("Failed to establish initial connection: %v", err)
-		server.Stop()
-		return
-	}
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -111,133 +163,33 @@ func Run(controllerManagerAddress string, mps bool) {
 		panic(err)
 	}
 
-	klog.Info("The connection to the device-controller-manager succeed.")
-
-	// Send hello message
 	helloMessage := types.ConfiguratorNodeHelloMessage{
 		Hostname: hostname,
 		GrpcPort: 5001,
 	}
-	klog.Infof("Sending hello message to the device-controller-manager with hostname: %s\n", hostname)
-	b, err := types.EncodeToByte(helloMessage)
 
-	klog.Infof("The encoded hello message: %v\n %d", b, len(b))
-	if err != nil {
-		klog.Fatalf("Error failed to encode ConfiguratorNodeHelloMessage: %v", err)
-	}
+	// Start controller-manager connection goroutine
+	go maintainConnection(
+		"controller-manager",
+		controllerManagerAddress,
+		helloMessage,
+		sigChan,
+		recvMsgAndWriteConfig, // message handler for controller-manager
+	)
 
-	_, err = conn.Write(b)
-	if err != nil {
-		klog.Error("Error failed to write msg: %v", err)
-		conn.Close()
-		return
-	}
+	// Start fastfunc-controller connection goroutine (no message handler)
+	go maintainConnection(
+		"fastfunc-controller",
+		fastFuncControllerAddress,
+		helloMessage,
+		sigChan,
+		nil, // no message handler for now
+	)
 
-	configMsg, err := reader.ReadBytes('\n')
-	if err != nil {
-		klog.Errorf("Error while Receiving Msg from fastpod-controller-manager: %v", err)
-		conn.Close()
-		return
-	}
-
-	var ack types.ConfiguratorNodeAckMessage
-	err = types.DecodeFromByte(configMsg, &ack)
-
-	if err != nil {
-		klog.Fatalf("Error failed to decode ConfiguratorNodeAckMessage: %v", err)
-		conn.Close()
-		return
-	}
-	if !ack.Ok {
-		klog.Fatalf("Error failed to receive ack message from device-controller-manager: %v", err)
-		conn.Close()
-		return
-	}
-
-	klog.Infof("Received ack message from device-controller-manager: %v", ack)
-
-	// Start heartbeat
-	nodeHeartbeater := time.NewTicker(time.Second * time.Duration(HeartbeatItv))
-
-	// Start a goroutine to handle reconnection
-	go func() {
-		// Start the heartbeat goroutine and get the connection closed channel
-		heartbeatDone := make(chan struct{})
-		go func() {
-			sendNodeHeartbeats(conn, nodeHeartbeater.C, heartbeatDone)
-		}()
-
-		// Wait for either a signal or connection closure
-		select {
-		case <-sigChan:
-			klog.Info("Received shutdown signal, closing connection and exiting")
-			conn.Close()
-			return
-		case <-heartbeatDone:
-			klog.Warning("Connection to controller-manager lost, attempting to reconnect")
-
-			// Cleanup old connection and ticker
-			conn.Close()
-			nodeHeartbeater.Stop()
-
-			// Try to reconnect
-			reconnConn, reconnReader, reconnErr := connectToController()
-			if reconnErr != nil {
-				klog.Errorf("Failed to reconnect: %v", reconnErr)
-				close(connClosedChan) // Signal main goroutine to exit
-				return
-			}
-
-			klog.Info("Successfully reconnected to controller-manager")
-			conn = reconnConn
-			reader = reconnReader
-
-			// Send hello message again
-			_, err = conn.Write(b) // Reuse the hello message from before
-			if err != nil {
-				klog.Errorf("Failed to send hello message after reconnect: %v", err)
-				conn.Close()
-				close(connClosedChan)
-				return
-			}
-
-			// Wait for ack again
-			configMsg, err = reader.ReadBytes('\n')
-			if err != nil {
-				klog.Errorf("Error reading ack after reconnect: %v", err)
-				conn.Close()
-				close(connClosedChan)
-				return
-			}
-
-			err = types.DecodeFromByte(configMsg, &ack)
-			if err != nil || !ack.Ok {
-				klog.Errorf("Failed to receive valid ack after reconnect: %v", err)
-				conn.Close()
-				close(connClosedChan)
-				return
-			}
-
-			// Restart heartbeat
-			nodeHeartbeater = time.NewTicker(time.Second * time.Duration(HeartbeatItv))
-			go func() {
-				sendNodeHeartbeats(conn, nodeHeartbeater.C, heartbeatDone)
-			}()
-		}
-	}()
-
-	// Wait for either a shutdown signal or notification that the connection is permanently closed
-	select {
-	case <-sigChan:
-		klog.Infof("Received signal, shutting down")
-	case <-connClosedChan:
-		klog.Infof("Connection permanently closed, shutting down")
-	}
-
-	// Cleanup
-	if conn != nil {
-		conn.Close()
-	}
+	// Wait for signal
+	<-sigChan
+	klog.Infof("Received signal, shutting down main process")
+	server.Stop()
 }
 
 func writeMsgToConn(conn net.Conn, b []byte) error {
