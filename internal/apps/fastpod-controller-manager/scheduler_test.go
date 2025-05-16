@@ -25,7 +25,7 @@ func TestFindBestNode(t *testing.T) {
 		SMRequest:      intPtr(40),
 	}
 
-	_, err := ctr.FindBestNode(req)
+	_, err := ctr.ScheduleRequest(req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -317,3 +317,13 @@ func (s *ConfiguratorServer) UpdateMPSConfigs(ctx context.Context, in *seti.Upda
 	// Always return success since update is best-effort
 	return &seti.UpdateMPSConfigsResponse{}, nil
 }
+
+func (s *ConfiguratorServer) GetGPU(ctx context.Context, in *seti.GetGPURequest) (*seti.GetGPUResponse, error) {
+
+	gpu, err := s.manager.GetVirtualGPU(in.Uuid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get GPU: %w", err)
+	}
+
+	return &seti.GetGPUResponse{ProvisionedGpu: mapToSetiVirtualGPU(gpu)}, nil
+}

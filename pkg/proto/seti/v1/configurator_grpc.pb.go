@@ -19,13 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GPUConfiguratorService_GetAvailableGPUs_FullMethodName  = "/seti.v1.GPUConfiguratorService/GetAvailableGPUs"
-	GPUConfiguratorService_RequestVirtualGPU_FullMethodName = "/seti.v1.GPUConfiguratorService/RequestVirtualGPU"
-	GPUConfiguratorService_GetHealth_FullMethodName         = "/seti.v1.GPUConfiguratorService/GetHealth"
-	GPUConfiguratorService_ReleaseVirtualGPU_FullMethodName = "/seti.v1.GPUConfiguratorService/ReleaseVirtualGPU"
-	GPUConfiguratorService_EnableMPS_FullMethodName         = "/seti.v1.GPUConfiguratorService/EnableMPS"
-	GPUConfiguratorService_DisableMPS_FullMethodName        = "/seti.v1.GPUConfiguratorService/DisableMPS"
-	GPUConfiguratorService_UpdateMPSConfigs_FullMethodName  = "/seti.v1.GPUConfiguratorService/UpdateMPSConfigs"
+	GPUConfiguratorService_GetAvailableGPUs_FullMethodName  = "/pkg.proto.seti.v1.GPUConfiguratorService/GetAvailableGPUs"
+	GPUConfiguratorService_RequestVirtualGPU_FullMethodName = "/pkg.proto.seti.v1.GPUConfiguratorService/RequestVirtualGPU"
+	GPUConfiguratorService_GetHealth_FullMethodName         = "/pkg.proto.seti.v1.GPUConfiguratorService/GetHealth"
+	GPUConfiguratorService_ReleaseVirtualGPU_FullMethodName = "/pkg.proto.seti.v1.GPUConfiguratorService/ReleaseVirtualGPU"
+	GPUConfiguratorService_GetGPU_FullMethodName            = "/pkg.proto.seti.v1.GPUConfiguratorService/GetGPU"
+	GPUConfiguratorService_EnableMPS_FullMethodName         = "/pkg.proto.seti.v1.GPUConfiguratorService/EnableMPS"
+	GPUConfiguratorService_DisableMPS_FullMethodName        = "/pkg.proto.seti.v1.GPUConfiguratorService/DisableMPS"
+	GPUConfiguratorService_UpdateMPSConfigs_FullMethodName  = "/pkg.proto.seti.v1.GPUConfiguratorService/UpdateMPSConfigs"
 )
 
 // GPUConfiguratorServiceClient is the client API for GPUConfiguratorService service.
@@ -40,6 +41,7 @@ type GPUConfiguratorServiceClient interface {
 	RequestVirtualGPU(ctx context.Context, in *RequestVirtualGPURequest, opts ...grpc.CallOption) (*RequestVirtualGPUResponse, error)
 	GetHealth(ctx context.Context, in *GetHealthRequest, opts ...grpc.CallOption) (*GetHealthResponse, error)
 	ReleaseVirtualGPU(ctx context.Context, in *ReleaseVirtualGPURequest, opts ...grpc.CallOption) (*ReleaseVirtualGPUResponse, error)
+	GetGPU(ctx context.Context, in *GetGPURequest, opts ...grpc.CallOption) (*GetGPUResponse, error)
 	EnableMPS(ctx context.Context, in *EnableMPSRequest, opts ...grpc.CallOption) (*EnableMPSResponse, error)
 	DisableMPS(ctx context.Context, in *DisableMPSRequest, opts ...grpc.CallOption) (*DisableMPSResponse, error)
 	// Update MPS configurations for a device
@@ -94,6 +96,16 @@ func (c *gPUConfiguratorServiceClient) ReleaseVirtualGPU(ctx context.Context, in
 	return out, nil
 }
 
+func (c *gPUConfiguratorServiceClient) GetGPU(ctx context.Context, in *GetGPURequest, opts ...grpc.CallOption) (*GetGPUResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGPUResponse)
+	err := c.cc.Invoke(ctx, GPUConfiguratorService_GetGPU_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *gPUConfiguratorServiceClient) EnableMPS(ctx context.Context, in *EnableMPSRequest, opts ...grpc.CallOption) (*EnableMPSResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EnableMPSResponse)
@@ -136,6 +148,7 @@ type GPUConfiguratorServiceServer interface {
 	RequestVirtualGPU(context.Context, *RequestVirtualGPURequest) (*RequestVirtualGPUResponse, error)
 	GetHealth(context.Context, *GetHealthRequest) (*GetHealthResponse, error)
 	ReleaseVirtualGPU(context.Context, *ReleaseVirtualGPURequest) (*ReleaseVirtualGPUResponse, error)
+	GetGPU(context.Context, *GetGPURequest) (*GetGPUResponse, error)
 	EnableMPS(context.Context, *EnableMPSRequest) (*EnableMPSResponse, error)
 	DisableMPS(context.Context, *DisableMPSRequest) (*DisableMPSResponse, error)
 	// Update MPS configurations for a device
@@ -161,6 +174,9 @@ func (UnimplementedGPUConfiguratorServiceServer) GetHealth(context.Context, *Get
 }
 func (UnimplementedGPUConfiguratorServiceServer) ReleaseVirtualGPU(context.Context, *ReleaseVirtualGPURequest) (*ReleaseVirtualGPUResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseVirtualGPU not implemented")
+}
+func (UnimplementedGPUConfiguratorServiceServer) GetGPU(context.Context, *GetGPURequest) (*GetGPUResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGPU not implemented")
 }
 func (UnimplementedGPUConfiguratorServiceServer) EnableMPS(context.Context, *EnableMPSRequest) (*EnableMPSResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EnableMPS not implemented")
@@ -265,6 +281,24 @@ func _GPUConfiguratorService_ReleaseVirtualGPU_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GPUConfiguratorService_GetGPU_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGPURequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GPUConfiguratorServiceServer).GetGPU(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GPUConfiguratorService_GetGPU_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GPUConfiguratorServiceServer).GetGPU(ctx, req.(*GetGPURequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GPUConfiguratorService_EnableMPS_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EnableMPSRequest)
 	if err := dec(in); err != nil {
@@ -323,7 +357,7 @@ func _GPUConfiguratorService_UpdateMPSConfigs_Handler(srv interface{}, ctx conte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var GPUConfiguratorService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "seti.v1.GPUConfiguratorService",
+	ServiceName: "pkg.proto.seti.v1.GPUConfiguratorService",
 	HandlerType: (*GPUConfiguratorServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -341,6 +375,10 @@ var GPUConfiguratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseVirtualGPU",
 			Handler:    _GPUConfiguratorService_ReleaseVirtualGPU_Handler,
+		},
+		{
+			MethodName: "GetGPU",
+			Handler:    _GPUConfiguratorService_GetGPU_Handler,
 		},
 		{
 			MethodName: "EnableMPS",

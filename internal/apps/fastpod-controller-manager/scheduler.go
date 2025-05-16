@@ -18,13 +18,12 @@ package fastpodcontrollermanager
 
 import (
 	"container/list"
+	"context"
 	"fmt"
 	"math"
 
 	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"github.com/KontonGu/FaST-GShare/pkg/types"
-	"k8s.io/apimachinery/pkg/labels"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
 )
 
@@ -86,182 +85,234 @@ func TransformedSM(req *ResourceRequest, vgpu *seti.VirtualGPU) (int, error) {
 
 type SelectionResult struct {
 	fastPodKey string
-	Node       *Node
-	VGPU       *seti.VirtualGPU
-	FinalSM    int
+	NodeName   string
+	VGPUUUID   string
 }
 
-func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, error) {
+func (ctr *Controller) ScheduleRequest(req *ResourceRequest) (*SelectionResult, error) {
 
 	nodesInfoMtx.Lock()
-
 	defer nodesInfoMtx.Unlock()
 
-	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
+	if req.RequestedNode == nil {
+		return nil, fmt.Errorf("requested node is nil")
+	}
+
+	if req.RequestGPUUUID == nil {
+		return nil, fmt.Errorf("request gpu uuid is nil")
+	}
+
+	node, ok := nodes[*req.RequestedNode]
+	if !ok {
+		return nil, fmt.Errorf("node %s not found", req.RequestedNode)
+	}
+
+	gpu, err := node.grpcClient.GetGPU(context.Background(), &seti.GetGPURequest{Uuid: *req.RequestGPUUUID})
 	if err != nil {
-		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
-		utilruntime.HandleError(errInfo)
-		return nil, errInfo
+		return nil, fmt.Errorf("error getting gpu %s: %v", *req.RequestGPUUUID, err)
 	}
 
-	klog.Infof("Nodelist count is: %d", len(nodeList))
-
-	var bestNode *Node
-	var bestVGPU *seti.VirtualGPU
-	bestScore := 1e9 // Initialize to a large number
-	var finalSM float64
-
-	for _, n := range nodeList {
-		node, ok := nodes[n.Name]
-
-		if !ok {
-			continue
+	selectedGPU, ok := node.vGPUID2GPU[*req.RequestGPUUUID]
+	//always get gpu from configurator
+	if !ok {
+		selectedGPU = &GPUDevInfo{
+			UUID:           gpu.ProvisionedGpu.ProvisionedGpu.Uuid,
+			ParentUUID:     gpu.ProvisionedGpu.ProvisionedGpu.ParentUuid,
+			virtual:        !gpu.ProvisionedGpu.IsPhysical,
+			Mem:            int64(gpu.ProvisionedGpu.MemoryBytes),
+			smCount:        int(gpu.ProvisionedGpu.MultiprocessorCount),
+			SMPercentage:   int(gpu.ProvisionedGpu.SmPercentage),
+			Usage:          0,
+			UsageMem:       0,
+			FastPodList:    list.New(),
+			MPSPodList:     list.New(),
+			allocationType: types.AllocationTypeNone,
 		}
-		//check if live
-		if n, ok := nodesLiveness[n.Name]; ok && n.Status != NodeReady {
-			continue
-		}
-		allVGPU := node.vgpus
-		usageMap := node.vGPUID2GPU
-
-		for _, vgpu := range allVGPU {
-			var devInfo *GPUDevInfo
-			var memBytes int64
-			var uuid string
-
-			if vgpu.IsProvisioned && vgpu.ProvisionedGpu != nil {
-				uuid = vgpu.ProvisionedGpu.Uuid
-				memBytes = int64(vgpu.ProvisionedGpu.MemoryBytes)
-				devInfo, ok = usageMap[uuid]
-				if !ok {
-					devInfo = &GPUDevInfo{
-						smCount:        int(vgpu.ProvisionedGpu.MultiprocessorCount),
-						SMPercentage:   int(vgpu.SmPercentage),
-						UUID:           uuid,
-						Mem:            memBytes,
-						Usage:          0,
-						UsageMem:       0,
-						FastPodList:    list.New(),
-						MPSPodList:     list.New(),
-						allocationType: types.AllocationTypeNone,
-					}
-				}
-			} else {
-				memBytes = int64(vgpu.MemoryBytes)
-				uuid = vgpu.Id
-				devInfo = &GPUDevInfo{
-					smCount:        int(vgpu.MultiprocessorCount),
-					SMPercentage:   int(vgpu.SmPercentage),
-					UUID:           uuid,
-					Mem:            memBytes,
-					Usage:          0,
-					UsageMem:       0,
-					FastPodList:    list.New(),
-					MPSPodList:     list.New(),
-					allocationType: types.AllocationTypeNone,
-				}
-			}
-
-			if memBytes == 0 {
-				continue
-			}
-
-			klog.Infof("KONTON_TEST: gpu used sm usage = %f", devInfo.Usage)
-
-			// Step 10: if not CanFit(G, R) then continue
-			if !canFit(req, devInfo) {
-				klog.Infof("KONTON_TEST: gpu cannot fit %f %f", devInfo.Usage, devInfo.UsageMem)
-				continue
-			}
-
-			// Step 13: if R.gpu type != G.gpu type, adjust SMs
-			var adjSM int
-			var smRatio float64
-			if req.AllocationType == types.AllocationTypeMPS {
-				adjSM = 0
-				smRatio = 0.0
-			} else {
-				if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType != vgpu.ProvisionedGpu.Name {
-					adjSM, err = TransformedSM(req, vgpu)
-					if err != nil {
-						klog.Errorf("error TransformedSM: %s", err)
-						continue
-					}
-				} else if req.SMPercentage != nil {
-					adjSM = *req.SMPercentage
-				} else {
-					adjSM = 0
-				}
-				if devInfo.smCount > 0 {
-					smRatio = float64(adjSM) / float64(devInfo.smCount)
-				} else {
-					smRatio = 0.0
-				}
-			}
-
-			// Step 19: mem ratio = R.mem req / G.total memory
-			var memRatio float64
-			if devInfo.Mem > 0 {
-				memRatio = float64(req.Memory) / float64(devInfo.Mem)
-			} else {
-				memRatio = 0.0
-			}
-
-			// Affinity priority
-			affinity_priority := 0.0
-			gpuSet, ok := fastPodToPhysicalGPUs[req.podKey]
-			klog.Infof("KONTON_TEST: gpuSet = %v", gpuSet)
-
-			if ok && gpuSet[vgpu.ProvisionedGpu.ParentUuid] {
-				klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
-
-				affinity_priority = 10.0
-			} else {
-				klog.Info("No affinity priority")
-			}
-			klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
-
-			// Mode priority
-			mode_priority := 0.0
-			if req.AllocationType == devInfo.allocationType && req.AllocationType != types.AllocationTypeExclusive {
-				mode_priority = 3.0
-			}
-
-			// GPU priority
-			gpu_priority := 0.0
-			if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType == vgpu.ProvisionedGpu.Name {
-				gpu_priority = 1.0
-			}
-
-			// Step 22-27: scoring
-			var score float64
-			if req.AllocationType == types.AllocationTypeMPS || smRatio <= memRatio {
-				// Mem-heavy: balance SMs (or always for MPS)
-				score = (devInfo.Usage - float64(adjSM)) / 100
-			} else {
-				// SM-heavy: balance memory
-				score = (float64((devInfo.Mem - devInfo.UsageMem) - req.Memory)) / float64(devInfo.Mem)
-			}
-			score = score - affinity_priority - mode_priority - gpu_priority
-
-			klog.Infof("score for gpu %s , with parent %s is %f", vgpu.Id, vgpu.ProvisionedGpu.ParentUuid, score)
-
-			if score < bestScore {
-				bestScore = score
-				bestNode = node
-				bestVGPU = vgpu
-				finalSM = float64(adjSM)
-			}
-		}
+		node.vGPUID2GPU[*req.RequestGPUUUID] = selectedGPU
 	}
 
-	if bestNode != nil && bestVGPU != nil {
-		// Allocation logic would go here (not implemented)
-		klog.Infof("Selected GPU: %s on node %s with score %f and finalSM %f", bestVGPU.Id, bestNode.hostName, bestScore, finalSM)
-		return &SelectionResult{fastPodKey: req.podKey, Node: bestNode, VGPU: bestVGPU, FinalSM: int(finalSM)}, nil
+	node.vGPUID2GPU[*req.RequestGPUUUID] = selectedGPU
+
+	//check can fit
+	if !canFit(req, selectedGPU) {
+		return nil, fmt.Errorf("gpu %s cannot fit", *req.RequestGPUUUID)
 	}
-	return nil, fmt.Errorf("no suitable candidates found")
+
+	return &SelectionResult{fastPodKey: req.podKey, NodeName: node.hostName, VGPUUUID: *req.RequestGPUUUID}, nil
+
 }
+
+// func (ctr *Controller) FindBestNode(req *ResourceRequest) (*SelectionResult, error) {
+
+// 	nodesInfoMtx.Lock()
+
+// 	defer nodesInfoMtx.Unlock()
+
+// 	nodeList, err := ctr.nodesLister.List(labels.Set{"gpu": "present"}.AsSelector())
+// 	if err != nil {
+// 		errInfo := fmt.Errorf("error Cannot find gpu node with the lable \"gpu:present\"")
+// 		utilruntime.HandleError(errInfo)
+// 		return nil, errInfo
+// 	}
+
+// 	klog.Infof("Nodelist count is: %d", len(nodeList))
+
+// 	var bestNode *Node
+// 	var bestVGPU *seti.VirtualGPU
+// 	bestScore := 1e9 // Initialize to a large number
+// 	var finalSM float64
+
+// 	for _, n := range nodeList {
+// 		node, ok := nodes[n.Name]
+
+// 		if !ok {
+// 			continue
+// 		}
+// 		//check if live
+// 		if n, ok := nodesLiveness[n.Name]; ok && n.Status != NodeReady {
+// 			continue
+// 		}
+// 		allVGPU := node.vgpus
+// 		usageMap := node.vGPUID2GPU
+
+// 		for _, vgpu := range allVGPU {
+// 			var devInfo *GPUDevInfo
+// 			var memBytes int64
+// 			var uuid string
+
+// 			if vgpu.IsProvisioned && vgpu.ProvisionedGpu != nil {
+// 				uuid = vgpu.ProvisionedGpu.Uuid
+// 				memBytes = int64(vgpu.ProvisionedGpu.MemoryBytes)
+// 				devInfo, ok = usageMap[uuid]
+// 				if !ok {
+// 					devInfo = &GPUDevInfo{
+// 						smCount:        int(vgpu.ProvisionedGpu.MultiprocessorCount),
+// 						SMPercentage:   int(vgpu.SmPercentage),
+// 						UUID:           uuid,
+// 						Mem:            memBytes,
+// 						Usage:          0,
+// 						UsageMem:       0,
+// 						FastPodList:    list.New(),
+// 						MPSPodList:     list.New(),
+// 						allocationType: types.AllocationTypeNone,
+// 					}
+// 				}
+// 			} else {
+// 				memBytes = int64(vgpu.MemoryBytes)
+// 				uuid = vgpu.Id
+// 				devInfo = &GPUDevInfo{
+// 					smCount:        int(vgpu.MultiprocessorCount),
+// 					SMPercentage:   int(vgpu.SmPercentage),
+// 					UUID:           uuid,
+// 					Mem:            memBytes,
+// 					Usage:          0,
+// 					UsageMem:       0,
+// 					FastPodList:    list.New(),
+// 					MPSPodList:     list.New(),
+// 					allocationType: types.AllocationTypeNone,
+// 				}
+// 			}
+
+// 			if memBytes == 0 {
+// 				continue
+// 			}
+
+// 			klog.Infof("KONTON_TEST: gpu used sm usage = %f", devInfo.Usage)
+
+// 			// Step 10: if not CanFit(G, R) then continue
+// 			if !canFit(req, devInfo) {
+// 				klog.Infof("KONTON_TEST: gpu cannot fit %f %f", devInfo.Usage, devInfo.UsageMem)
+// 				continue
+// 			}
+
+// 			// Step 13: if R.gpu type != G.gpu type, adjust SMs
+// 			var adjSM int
+// 			var smRatio float64
+// 			if req.AllocationType == types.AllocationTypeMPS {
+// 				adjSM = 0
+// 				smRatio = 0.0
+// 			} else {
+// 				if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType != vgpu.ProvisionedGpu.Name {
+// 					adjSM, err = TransformedSM(req, vgpu)
+// 					if err != nil {
+// 						klog.Errorf("error TransformedSM: %s", err)
+// 						continue
+// 					}
+// 				} else if req.SMPercentage != nil {
+// 					adjSM = *req.SMPercentage
+// 				} else {
+// 					adjSM = 0
+// 				}
+// 				if devInfo.smCount > 0 {
+// 					smRatio = float64(adjSM) / float64(devInfo.smCount)
+// 				} else {
+// 					smRatio = 0.0
+// 				}
+// 			}
+
+// 			// Step 19: mem ratio = R.mem req / G.total memory
+// 			var memRatio float64
+// 			if devInfo.Mem > 0 {
+// 				memRatio = float64(req.Memory) / float64(devInfo.Mem)
+// 			} else {
+// 				memRatio = 0.0
+// 			}
+
+// 			// Affinity priority
+// 			affinity_priority := 0.0
+// 			gpuSet, ok := fastPodToPhysicalGPUs[req.podKey]
+// 			klog.Infof("KONTON_TEST: gpuSet = %v", gpuSet)
+
+// 			if ok && gpuSet[vgpu.ProvisionedGpu.ParentUuid] {
+// 				klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
+
+// 				affinity_priority = 10.0
+// 			} else {
+// 				klog.Info("No affinity priority")
+// 			}
+// 			klog.Infof("KONTON_TEST: gpu affinity priority = %f", affinity_priority)
+
+// 			// Mode priority
+// 			mode_priority := 0.0
+// 			if req.AllocationType == devInfo.allocationType && req.AllocationType != types.AllocationTypeExclusive {
+// 				mode_priority = 3.0
+// 			}
+
+// 			// GPU priority
+// 			gpu_priority := 0.0
+// 			if req.RequestedGPUType != nil && vgpu.ProvisionedGpu != nil && *req.RequestedGPUType == vgpu.ProvisionedGpu.Name {
+// 				gpu_priority = 1.0
+// 			}
+
+// 			// Step 22-27: scoring
+// 			var score float64
+// 			if req.AllocationType == types.AllocationTypeMPS || smRatio <= memRatio {
+// 				// Mem-heavy: balance SMs (or always for MPS)
+// 				score = (devInfo.Usage - float64(adjSM)) / 100
+// 			} else {
+// 				// SM-heavy: balance memory
+// 				score = (float64((devInfo.Mem - devInfo.UsageMem) - req.Memory)) / float64(devInfo.Mem)
+// 			}
+// 			score = score - affinity_priority - mode_priority - gpu_priority
+
+// 			klog.Infof("score for gpu %s , with parent %s is %f", vgpu.Id, vgpu.ProvisionedGpu.ParentUuid, score)
+
+// 			if score < bestScore {
+// 				bestScore = score
+// 				bestNode = node
+// 				bestVGPU = vgpu
+// 				finalSM = float64(adjSM)
+// 			}
+// 		}
+// 	}
+
+// 	if bestNode != nil && bestVGPU != nil {
+// 		// Allocation logic would go here (not implemented)
+// 		klog.Infof("Selected GPU: %s on node %s with score %f and finalSM %f", bestVGPU.Id, bestNode.hostName, bestScore, finalSM)
+// 		return &SelectionResult{fastPodKey: req.podKey, Node: bestNode, VGPU: bestVGPU, FinalSM: int(finalSM)}, nil
+// 	}
+// 	return nil, fmt.Errorf("no suitable candidates found")
+// }
 
 // canFitExclusive returns true if this GPU is completely free,
 // has at least the requested memory, and (if specified) has enough SMs.
@@ -337,7 +388,7 @@ func canFitFastPod(req *ResourceRequest, info *GPUDevInfo) bool {
 	// quota := req.FastPodRequirements.QuotaReq
 	sm_partition := req.FastPodRequirements.SMPartition
 
-	totalUsage := info.Usage + float64(sm_partition)/100.0
+	totalUsage := info.Usage + req.FastPodRequirements.QuotaReq*float64(sm_partition)/100.0
 
 	if totalUsage > 1.0 {
 		klog.Infof("KONTON_TEST: gpu requested sm = %d", sm_partition)

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package seti.v1;
+package pkg.proto.seti.v1;
 
 option go_package = "github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1;seti";
 
@@ -117,6 +117,15 @@ message ReleaseVirtualGPUResponse {
   repeated VirtualGPU available_virtual_gpus = 3;
 }
 
+
+message GetGPURequest {
+  string uuid = 1;
+}
+//must result physical gpu
+message GetGPUResponse {
+  VirtualGPU provisioned_gpu = 1;
+}
+
 // Service definition for GPU resource management
 service GPUConfiguratorService {
   // Get available virtual GPUs
@@ -128,6 +137,9 @@ service GPUConfiguratorService {
   rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {}
 
   rpc ReleaseVirtualGPU(ReleaseVirtualGPURequest) returns (ReleaseVirtualGPUResponse) {}
+
+
+  rpc GetGPU(GetGPURequest) returns (GetGPUResponse) {}
 
   rpc EnableMPS(EnableMPSRequest) returns (EnableMPSResponse) {}
 

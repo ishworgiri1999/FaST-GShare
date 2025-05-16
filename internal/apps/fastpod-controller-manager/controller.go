@@ -495,13 +495,13 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			klog.Infof("Request for pod with resource %v", request)
 
-			selectionResult, err := ctr.FindBestNode(request)
+			selectionResult, err := ctr.ScheduleRequest(request)
 			if selectionResult == nil || err != nil {
 				klog.Infof("Error cannot find the best node for the fastpod %s. %s", key, err)
 				return nil, errors.New("NoSchedNodeAvailable")
 			}
 
-			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectionResult.Node.hostName, selectionResult.VGPU.Id)
+			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectionResult.NodeName, selectionResult.VGPUUUID)
 
 			// generate the pod key for the new pod of FaSTPod
 			var subpodName string
@@ -519,12 +519,11 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// klog.Infof("The pod = %s of FaSTPod %s with vGPUID = %s is bound to device UUID=%s with GPUClientPort=%d.", podKey, key, schedvGPUID, gpuDevUUID, gpuClientPort)
 
 			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectionResult, request, podKey)
-			selectedNode := selectionResult.Node
+			selectedNode := selectionResult.NodeName
 
 			klog.Infof("KONTON_TEST: allocation = %v", allocation)
-			klog.Infof("KONTON_TEST: gpu used sm = %d", selectionResult.FinalSM)
 
-			selectedGPU := selectionResult.VGPU
+			selectedGPU := selectionResult.VGPUUUID
 			// errCode 0: no error
 			// errCode 1: node with nodeName is not initialized
 			// errCode 2: vGPUID is not initialized or no DummyPod created;
@@ -566,7 +565,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			podParams := &NewPodParams{
 				PodName:      subpodName,
-				SchedNode:    selectedNode.hostName,
+				SchedNode:    selectedNode,
 				SchedvGPUID:  allocation.UUID,
 				IsWarm:       false,
 				BoundDevUUID: allocation.UUID,
@@ -588,7 +587,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 				return nil, err
 			}
 			// KONTON_TODO
-			(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = selectedGPU.ProvisionedGpu.Uuid
+			(*fastpod.Status.BoundDeviceIDs)[newpod.Name] = selectedGPU
 
 			if allocation.MPSConfig != nil && allocation.MPSConfig.FastPodMPSConfig != nil {
 				(*fastpod.Status.GPUClientPort)[newpod.Name] = allocation.MPSConfig.FastPodMPSConfig.GpuClientPort

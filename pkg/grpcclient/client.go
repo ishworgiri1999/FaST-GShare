@@ -104,6 +104,16 @@ func (g *GrpcClient) ReleaseVirtualGPU(ctx context.Context, req *seti.ReleaseVir
 	}
 	return res, nil
 }
+
+func (g *GrpcClient) GetGPU(ctx context.Context, req *seti.GetGPURequest) (*seti.GetGPUResponse, error) {
+	// Call the gRPC service
+	res, err := g.client.GetGPU(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 func (g *GrpcClient) UpdateMPSConfigs(ctx context.Context, req *seti.UpdateMPSConfigsRequest) (*seti.UpdateMPSConfigsResponse, error) {
 
 	res, err := g.client.UpdateMPSConfigs(ctx, req)
