@@ -10,8 +10,10 @@ metadata:
     fastgshare/sm_count: "12"
     fastgshare/gpu_mem: "1000000000"
     fastgshare/allocation_type: "FASTPOD"
+    fastgshare/nodeName: "atschulz7"
+    fastgshare/vgpu_id: "GPU-bbc97af9-b22d-b2a7-24df-20ecae287dab"
 spec:
-  replicas: 7
+  replicas: 2
   podSpec:
     containers:
     - name: resnet-pytorch

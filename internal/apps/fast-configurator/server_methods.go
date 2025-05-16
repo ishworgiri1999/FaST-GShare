@@ -219,7 +219,7 @@ func (s *ConfiguratorServer) EnableMPS(ctx context.Context, in *seti.EnableMPSRe
 		return &seti.EnableMPSResponse{
 			Success: false,
 			Message: fmt.Sprintf("Device with UUID %s not found", in.DeviceUuid),
-		}, nil
+		}, fmt.Errorf("device with UUID %s not found", in.DeviceUuid)
 	}
 
 	// Start MPS daemon if not already running

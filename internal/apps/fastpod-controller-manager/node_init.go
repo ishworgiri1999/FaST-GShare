@@ -120,9 +120,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	nodesInfoMtx.Unlock()
 
 	klog.Infof("Received available GPUs from node configurator: %v", hostName)
-	for _, gpu := range response.Gpus {
-		klog.Infof("GPU: %v", gpu)
-	}
+
 	defer client.Close()
 
 	klog.Infof("Received health check response from node configurator: %v", health)

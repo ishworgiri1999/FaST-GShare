@@ -517,19 +517,29 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResul
 
 	gpuInfo, ok := node.vGPUID2GPU[selectionResult.VGPUUUID]
 
-	//rare case
-	if gpuInfo.allocationType != request.AllocationType {
-		klog.Errorf("Error: The allocation type is not the same, %s != %s", gpuInfo.allocationType, request.AllocationType)
-		return nil, 1
+	if !ok {
+		klog.Errorf("Error: The gpuInfo is not found, uuid = %s", selectionResult.VGPUUUID)
+		return nil, 3
 	}
 
-	logPath := fmt.Sprintf("/tmp/mps-%s.log", gpuInfo.UUID)
-	tmpPath := fmt.Sprintf("/tmp/mps-%s.tmp", gpuInfo.UUID)
+	if gpuInfo.allocationType == types.AllocationTypeNone {
+		//set gpu type
+		gpuInfo.allocationType = request.AllocationType
+	}
 
 	if gpuInfo.allocationType == types.AllocationTypeMPS || gpuInfo.allocationType == types.AllocationTypeFastPod {
+		//try to enable mps
+		res, err := node.grpcClient.EnableMPS(context.TODO(), gpuInfo.UUID)
+		if err != nil {
+			klog.Errorf("Error when enabling MPS for vGPU %s, err = %s", gpuInfo.UUID, err)
+		}
+		if res.Success {
+			klog.Infof("Successfully enabled MPS for vGPU %s,.", gpuInfo.UUID)
+		}
+
 		mpsConfig = &MPSConfig{
-			LogDirectory:  logPath,
-			PipeDirectory: tmpPath,
+			LogDirectory:  res.MpsConfig.LogPath,
+			PipeDirectory: res.MpsConfig.TmpPath,
 		}
 	}
 
