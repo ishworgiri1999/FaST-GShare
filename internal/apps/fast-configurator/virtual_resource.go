@@ -228,6 +228,8 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			continue
 		}
 
+		klog.Info("migCount: ", migCount)
+
 		klog.Infof("MIG device count for GPU %d: %d", i, migCount)
 
 		for j := 0; j < migCount; j++ {
@@ -373,7 +375,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			for j := 0; j < count; j++ {
 				vGPU := &VirtualGPU{
 					PhysicalGPUType:     physicalGPUName,
-					SMPercentage:        int(profile.InstanceCount) * 100 / int(migCount),
+					SMPercentage:        int(profile.SliceCount) * 100 / int(migCount),
 					Name:                fmt.Sprintf("%s-mig-profile-%d", physicalGPUName, profile.Id),
 					ID:                  fmt.Sprintf("vgpu-%d-profile%d-%d", i, profile.Id, j),
 					DeviceIndex:         i,

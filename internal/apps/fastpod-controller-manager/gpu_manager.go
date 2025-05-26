@@ -844,7 +844,9 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 							Uuid: gpuInfo.UUID,
 						})
 						if err != nil {
+							//TODO: in use
 							klog.Errorf("Error when releasing the vGPU %s, err = %s", gpuInfo.UUID, err)
+							break
 						}
 
 						if len(resp.AvailableVirtualGpus) > 0 {
