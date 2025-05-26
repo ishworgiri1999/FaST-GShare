@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -125,6 +126,14 @@ func maintainConnection(
 			case <-heartTicker.C:
 				err := writeMsgToConn(conn, beat)
 				if err != nil {
+
+					//broken pipe error
+					if strings.Contains(err.Error(), "broken pipe") {
+						klog.Errorf("[%s] Broken pipe error, reconnecting...", name)
+						conn.Close()
+						break heartbeatLoop
+					}
+
 					heartbeatFailures++
 					klog.Errorf("[%s] Heartbeat failed (%d/%d): %v", name, heartbeatFailures, maxHeartbeatFailures, err)
 					if heartbeatFailures >= maxHeartbeatFailures {

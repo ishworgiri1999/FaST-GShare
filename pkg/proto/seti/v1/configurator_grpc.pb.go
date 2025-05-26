@@ -19,14 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GPUConfiguratorService_GetAvailableGPUs_FullMethodName  = "/pkg.proto.seti.v1.GPUConfiguratorService/GetAvailableGPUs"
-	GPUConfiguratorService_RequestVirtualGPU_FullMethodName = "/pkg.proto.seti.v1.GPUConfiguratorService/RequestVirtualGPU"
-	GPUConfiguratorService_GetHealth_FullMethodName         = "/pkg.proto.seti.v1.GPUConfiguratorService/GetHealth"
-	GPUConfiguratorService_ReleaseVirtualGPU_FullMethodName = "/pkg.proto.seti.v1.GPUConfiguratorService/ReleaseVirtualGPU"
-	GPUConfiguratorService_GetGPU_FullMethodName            = "/pkg.proto.seti.v1.GPUConfiguratorService/GetGPU"
-	GPUConfiguratorService_EnableMPS_FullMethodName         = "/pkg.proto.seti.v1.GPUConfiguratorService/EnableMPS"
-	GPUConfiguratorService_DisableMPS_FullMethodName        = "/pkg.proto.seti.v1.GPUConfiguratorService/DisableMPS"
-	GPUConfiguratorService_UpdateMPSConfigs_FullMethodName  = "/pkg.proto.seti.v1.GPUConfiguratorService/UpdateMPSConfigs"
+	GPUConfiguratorService_GetAvailableGPUs_FullMethodName  = "/seti.v1.GPUConfiguratorService/GetAvailableGPUs"
+	GPUConfiguratorService_RequestVirtualGPU_FullMethodName = "/seti.v1.GPUConfiguratorService/RequestVirtualGPU"
+	GPUConfiguratorService_GetHealth_FullMethodName         = "/seti.v1.GPUConfiguratorService/GetHealth"
+	GPUConfiguratorService_ReleaseVirtualGPU_FullMethodName = "/seti.v1.GPUConfiguratorService/ReleaseVirtualGPU"
+	GPUConfiguratorService_GetGPU_FullMethodName            = "/seti.v1.GPUConfiguratorService/GetGPU"
+	GPUConfiguratorService_EnableMPS_FullMethodName         = "/seti.v1.GPUConfiguratorService/EnableMPS"
+	GPUConfiguratorService_DisableMPS_FullMethodName        = "/seti.v1.GPUConfiguratorService/DisableMPS"
+	GPUConfiguratorService_UpdateMPSConfigs_FullMethodName  = "/seti.v1.GPUConfiguratorService/UpdateMPSConfigs"
 )
 
 // GPUConfiguratorServiceClient is the client API for GPUConfiguratorService service.
@@ -357,7 +357,7 @@ func _GPUConfiguratorService_UpdateMPSConfigs_Handler(srv interface{}, ctx conte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var GPUConfiguratorService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pkg.proto.seti.v1.GPUConfiguratorService",
+	ServiceName: "seti.v1.GPUConfiguratorService",
 	HandlerType: (*GPUConfiguratorServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

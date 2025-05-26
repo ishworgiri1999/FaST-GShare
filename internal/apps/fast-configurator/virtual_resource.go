@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/KontonGu/FaST-GShare/pkg/mig"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -105,6 +106,31 @@ func NewResourceManager() (*ResourceManager, error) {
 	// Initialize virtual resources
 	gpus := rm.getAvailableVirtualResources()
 	rm.VirtualGPUs = gpus
+
+	//try to create one mig try
+
+	for _, vGPU := range gpus {
+
+		if vGPU.ProvisionedGPU != nil {
+			fmt.Printf("vgpu: %v\n", vGPU.ProvisionedGPU.UUID)
+		}
+
+		if vGPU.Mig != nil {
+			err := rm.Access(vGPU)
+			if err != nil {
+				log.Printf("Warning: Failed to access virtual GPU: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+
+			}
+
+			klog.Infof("Accessed virtual GPU: %s", vGPU.ID)
+			//uuid
+			klog.Infof("uuid: %s", vGPU.ProvisionedGPU.UUID)
+
+		}
+	}
+
 	klog.Infof("Found %d virtual GPUs", len(gpus))
 	klog.Infof("Found %d physical GPUs", len(rm.PhysicalGPUs))
 	klog.Infof("Found %d provisioned GPUs", len(rm.provisionedGPUs))
@@ -115,7 +141,7 @@ func (rm *ResourceManager) CleanUp() {
 	//clear all mps servers
 
 	for _, vGPU := range rm.provisionedGPUs {
-		if vGPU.ProvisionedGPU.mpsServer.isEnabled {
+		if vGPU.ProvisionedGPU != nil && vGPU.ProvisionedGPU.mpsServer.isEnabled {
 			err := vGPU.ProvisionedGPU.mpsServer.StopMPSDaemon()
 			if err != nil {
 				log.Printf("cleanup:Warning: Failed to stop MPS daemon: %v", err)
@@ -267,6 +293,9 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			}
 
 			gpuInstanceID, ret := migDevice.GetGpuInstanceId()
+
+			log.Printf("gpu instance id %d", gpuInstanceID)
+			log.Printf("compute instance id %d", computeInstanceID)
 			if ret != nvml.SUCCESS {
 				log.Printf("Warning: Could not get GPU instance ID for MIG device %d, index %d: %v", i, j, ret)
 				continue
@@ -342,9 +371,8 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				},
 			}
 
-			if !ok {
-				rm.provisionedGPUs[migDeviceUUID] = vgpu
-			}
+			rm.provisionedGPUs[migDeviceUUID] = vgpu
+
 			gpus = append(gpus, vgpu)
 
 		}
@@ -451,6 +479,13 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("failed to create GPU instance: %v", ret.String())
 	}
+
+	giInfo, ret := gpuInstance.GetInfo()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		return fmt.Errorf("failed to get gpu instance info: %v", ret)
+	}
+
 	v.Mig.GPUInstance = &gpuInstance
 
 	giMig := rm.mig.GpuInstance(gpuInstance)
@@ -480,24 +515,56 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	v.IsProvisioned = true
 
 	ciInfo, ret := computeInstance.GetInfo()
+
 	if ret != nvml.SUCCESS {
 		gpuInstance.Destroy()
 		computeInstance.Destroy()
 		return fmt.Errorf("failed to get compute instance info: %v", ret)
 	}
 
+	//get mig device handle
+
 	ciDevice := ciInfo.Device
 
-	//name
-	newDeviceName, ret := ciDevice.GetName()
+	log.Printf("ciinfo: %v", ciInfo)
+
+	//uuid
+	getIndex, ret := ciDevice.GetIndex()
 	if ret != nvml.SUCCESS {
 		gpuInstance.Destroy()
 		computeInstance.Destroy()
-		return fmt.Errorf("failed to get compute instance name: %v", ret)
+		return fmt.Errorf("failed to get compute instance index: %v", ret)
 	}
 
-	//uuid
-	newDeviceUUID, ret := ciDevice.GetUUID()
+	klog.Infof("getIndex: %d", getIndex)
+	migdev, err := FindMigDeviceUUIDForComputeInstance(device, giInfo.Id, ciInfo.Id)
+	if err != nil {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get compute instance mig device handle: %v", err)
+	}
+
+	//mig device name
+	migdevName, ret := migdev.GetName()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get mig device name: %v", ret)
+	}
+
+	klog.Infof("migdevName: %s", migdevName)
+
+	//get mig device uuid
+	migdevUUID, ret := migdev.GetUUID()
+	if ret != nvml.SUCCESS {
+		gpuInstance.Destroy()
+		computeInstance.Destroy()
+		return fmt.Errorf("failed to get mig device uuid: %v", ret)
+	}
+
+	klog.Info("miguuid: ", migdevUUID)
+
+	klog.Info("migindex: ", getIndex)
 	if ret != nvml.SUCCESS {
 		gpuInstance.Destroy()
 		computeInstance.Destroy()
@@ -519,18 +586,19 @@ func (rm *ResourceManager) Access(v *VirtualGPU) error {
 	}
 
 	v.ProvisionedGPU = &GPU{
-		UUID:                newDeviceUUID,
-		Name:                newDeviceName,
+		UUID:                migdevUUID,
+		Name:                migdevName,
 		MemoryBytes:         memoo.Total,
 		MultiProcessorCount: v.MultiProcessorCount,
 		ParentDeviceIndex:   v.DeviceIndex,
 		ParentUUID:          parentUUID,
 		ProvisionedDevice:   ciDevice,
 		mpsServer: MPSServer{
-			UUID: newDeviceUUID,
-			Name: newDeviceName,
+			UUID: migdevUUID,
+			Name: migdevName,
 		},
 	}
+	rm.provisionedGPUs[migdevUUID] = v
 
 	return nil
 }
@@ -575,10 +643,45 @@ func (rm *ResourceManager) Release(v *VirtualGPU) error {
 	} else {
 		klog.Info("gpu instance is nil for vgpu: ", v.ID)
 	}
-	rm.provisionedGPUs[v.ProvisionedGPU.UUID] = nil
+	delete(rm.provisionedGPUs, v.ProvisionedGPU.UUID)
 
 	v.IsProvisioned = false
 	v.ProvisionedGPU = nil
 
 	return nil
+}
+
+func FindMigDeviceUUIDForComputeInstance(parentDevice nvml.Device, targetGpuInstanceID, targetComputeInstanceID uint32) (nvml.Device, error) {
+	migCount, ret := parentDevice.GetMaxMigDeviceCount()
+	if ret != nvml.SUCCESS {
+		return nil, fmt.Errorf("failed to get MIG device count: %v", ret)
+	}
+	for i := 0; i < migCount; i++ {
+		migDev, ret := parentDevice.GetMigDeviceHandleByIndex(i)
+		if ret != nvml.SUCCESS {
+			continue
+		}
+		gpuId, ret := migDev.GetGpuInstanceId()
+		if ret != nvml.SUCCESS {
+			continue
+		}
+
+		log.Printf("gpu id %d", gpuId)
+		computeId, ret := migDev.GetComputeInstanceId()
+		if ret != nvml.SUCCESS {
+			continue
+		}
+
+		log.Printf("compute id %d", computeId)
+
+		if uint32(gpuId) == targetGpuInstanceID && uint32(computeId) == targetComputeInstanceID {
+
+			if ret == nvml.SUCCESS {
+				return migDev, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("MIG device UUID not found for compute instance")
+
 }

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package pkg.proto.seti.v1;
+package seti.v1;
 
 option go_package = "github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1;seti";
 

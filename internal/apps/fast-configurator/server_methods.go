@@ -134,6 +134,8 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 
 	}
 
+	log.Printf("vgpu created with uuid: %s", vgpu.ProvisionedGPU.UUID)
+
 	// Build the response
 	response := &seti.RequestVirtualGPUResponse{
 		Id:                  vgpu.ID,
@@ -157,7 +159,8 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 		}
 
 		vGPU := &seti.VirtualGPU{
-			Id:                  vg.ID,
+			Id: vg.ID,
+
 			DeviceIndex:         int32(vg.DeviceIndex),
 			MemoryBytes:         vg.MemoryBytes,
 			MultiprocessorCount: int32(vg.MultiProcessorCount),
