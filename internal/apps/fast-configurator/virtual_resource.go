@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/KontonGu/FaST-GShare/pkg/mig"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -106,30 +105,6 @@ func NewResourceManager() (*ResourceManager, error) {
 	// Initialize virtual resources
 	gpus := rm.getAvailableVirtualResources()
 	rm.VirtualGPUs = gpus
-
-	//try to create one mig try
-
-	for _, vGPU := range gpus {
-
-		if vGPU.ProvisionedGPU != nil {
-			fmt.Printf("vgpu: %v\n", vGPU.ProvisionedGPU.UUID)
-		}
-
-		if vGPU.Mig != nil {
-			err := rm.Access(vGPU)
-			if err != nil {
-				log.Printf("Warning: Failed to access virtual GPU: %v", err)
-				time.Sleep(1 * time.Second)
-				continue
-
-			}
-
-			klog.Infof("Accessed virtual GPU: %s", vGPU.ID)
-			//uuid
-			klog.Infof("uuid: %s", vGPU.ProvisionedGPU.UUID)
-
-		}
-	}
 
 	klog.Infof("Found %d virtual GPUs", len(gpus))
 	klog.Infof("Found %d physical GPUs", len(rm.PhysicalGPUs))
