@@ -99,11 +99,12 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 					corev1.EnvVar{
 						Name:  "GPU_CLIENT_PORT",
 						Value: fmt.Sprintf("%d", params.MPSConfig.FastPodMPSConfig.GpuClientPort),
-						// corev1.EnvVar{
-						// 	Name: "LD_PRELOAD",
-						// 	// Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
-						// },
-					})
+					},
+				// corev1.EnvVar{
+				// 	Name:  "LD_PRELOAD",
+				// 	Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
+				// }
+				)
 			}
 		}
 

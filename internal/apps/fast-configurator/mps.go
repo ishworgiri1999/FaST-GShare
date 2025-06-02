@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -134,23 +133,21 @@ func (m *MPSServer) StartMPSDaemon() error {
 // Returns true only if both "control" and "request" named pipes exist.
 func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
 	pipeDir := m.GetPipeDir() // e.g. "/tmp/mps_<UUID>"
-	controlPipe := filepath.Join(pipeDir, "control")
-	requestPipe := filepath.Join(pipeDir, "request")
-
-	for _, p := range []string{controlPipe, requestPipe} {
-		fi, err := os.Stat(p)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// pipe isn’t there → daemon not running for this GPU
-				return false, nil
-			}
-			return false, fmt.Errorf("failed to stat %s: %w", p, err)
-		}
-		if fi.Mode()&os.ModeNamedPipe == 0 {
-			// exists but isn’t a pipe
+	controlPipe := fmt.Sprintf("%s/control", pipeDir)
+	fi, err := os.Stat(controlPipe)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// pipe isn’t there → daemon not running for this GPU
 			return false, nil
 		}
+		return false, fmt.Errorf("failed to stat %s: %w", controlPipe, err)
 	}
+	if fi.Mode()&os.ModeNamedPipe == 0 {
+		log.Printf("Warning: %s exists but isn’t a pipe", controlPipe)
+		// exists but isn’t a pipe
+		return false, nil
+	}
+
 	return true, nil
 }
 

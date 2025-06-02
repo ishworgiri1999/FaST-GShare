@@ -42,13 +42,14 @@ import (
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	kubescheme "k8s.io/client-go/kubernetes/scheme"
-	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 
+	"github.com/go-logr/logr"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/klog/v2"
 	k8scontroller "k8s.io/kubernetes/pkg/controller"
 	"k8s.io/utils/integer"
 )
@@ -90,7 +91,8 @@ type Controller struct {
 
 	// containerdClient *containerd.Client
 
-	db *ent.Client
+	db  *ent.Client
+	log *logr.Logger
 }
 
 // NewController returns a new FaSTPod controller
@@ -107,7 +109,7 @@ func NewController(
 	// Add fastpod-controller types to the default Kubernetes Scheme so Events can be
 	// logged for fastpod-controller types.
 	utilruntime.Must(fastpodscheme.AddToScheme(kubescheme.Scheme))
-	klog.V(4).Info("Creating event broadcaster")
+	ctrLogger := klog.NewKlogr().WithName("fastpod-controller")
 
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
@@ -136,20 +138,21 @@ func NewController(
 		workqueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "FaSTPods"),
 		recorder:  recorder,
 
-		db: dbClient,
+		db:  dbClient,
+		log: &ctrLogger,
 	}
 
-	klog.Info("Setting up event handlers")
+	ctrLogger.Info("setting up event handlers")
 	// Set up an event handler for when FaSTPod resources change
 	fastpodinformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.enqueueFaSTPod,
 		UpdateFunc: func(old, new interface{}) {
 			newFstp := new.(*fastpodv1.FaSTPod)
 			oldFstp := old.(*fastpodv1.FaSTPod)
-			klog.Infof("UpdateFunc: current FaSTPod %s with replica %d ", newFstp.Name, *newFstp.Spec.Replicas)
-			klog.Infof("UpdateFunc: queue length %d", controller.workqueue.Len())
+			controller.log.Info(fmt.Sprintf("updatefunc: current fastpod %s with replica %d ", newFstp.Name, *newFstp.Spec.Replicas))
+			controller.log.Info(fmt.Sprintf("updatefunc: queue length %d", controller.workqueue.Len()))
 			if newFstp.ResourceVersion != oldFstp.ResourceVersion {
-				klog.Infof("FaSTPod has different ResourceVersion, update the FaSTPod.")
+				controller.log.Info("fastpod has different resourceversion, update the fastpod.")
 				controller.enqueueFaSTPod(new)
 				return
 			}
@@ -197,10 +200,10 @@ func (ctr *Controller) Run(stopCh <-chan struct{}, workers int) error {
 	defer ctr.workqueue.ShutDown()
 
 	// Start the informer factories to begin populating the informer caches
-	klog.Info("Starting FaSTPod controller")
+	ctr.log.Info("starting fastpod controller")
 
 	// Wait for the caches to be synced before starting workers
-	klog.Info("Waiting for informer caches to sync")
+	ctr.log.Info("waiting for informer caches to sync")
 	if ok := cache.WaitForCacheSync(stopCh, ctr.podsSynced, ctr.fastpodsSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
@@ -214,14 +217,14 @@ func (ctr *Controller) Run(stopCh <-chan struct{}, workers int) error {
 	go ctr.pendingInsurance(pendingInsuranceTicker, &pendingInsuranceDone)
 
 	go ctr.startConfigManager(stopCh, ctr.kubeClient)
-	klog.Infof("Starting workers, Numuber of workers = %d.", workers)
+	ctr.log.Info(fmt.Sprintf("starting workers, numuber of workers = %d.", workers))
 	// Launch two workers to process FaSTPod resources
 	for i := 0; i < workers; i++ {
 		go wait.Until(ctr.runWorker, time.Second, stopCh)
 	}
-	klog.Info("Workers Started")
+	ctr.log.Info("workers started")
 	<-stopCh
-	klog.Info("Shutting down workers")
+	ctr.log.Info("shutting down workers")
 	pendingInsuranceTicker.Stop()
 	pendingInsuranceDone <- true
 	return nil
@@ -250,21 +253,21 @@ func (ctr *Controller) processNextWorkItem() bool {
 		var ok bool
 		if key, ok = obj.(string); !ok {
 			ctr.workqueue.Forget(obj)
-			utilruntime.HandleError(fmt.Errorf("The object in the workqueue is not valid. obj=%#v", obj))
+			utilruntime.HandleError(fmt.Errorf("the object in the workqueue is not valid. obj=%#v", obj))
 			return nil
 		}
 		if err := ctr.syncHandler(key); err != nil {
 			if err.Error() == "Waiting4Dummy" {
 				ctr.workqueue.Add(key)
-				return fmt.Errorf("TESTING: need to wait for dummy pod '#{key}', requeueing")
+				return fmt.Errorf("testing: need to wait for dummy pod '#{key}', requeueing")
 			}
 
 			ctr.workqueue.AddRateLimited(key)
-			return fmt.Errorf("Error while syncing the object = %s: %s. The object is re-queued.", key, err.Error())
+			return fmt.Errorf("error while syncing the object = %s: %s, the object is re-queued", key, err.Error())
 		}
 
 		ctr.workqueue.Forget(obj)
-		klog.Infof("Successfully sync the object = %s.", key)
+		ctr.log.Info(fmt.Sprintf("successfully sync the object = %s.", key))
 		return nil
 	}(objRef)
 
@@ -281,14 +284,14 @@ func (ctr *Controller) processNextWorkItem() bool {
 // with the current status of the resource.
 func (ctr *Controller) syncHandler(key string) error {
 	startTime := time.Now()
-	klog.Infof("Starting to sync FaSTPod %q (%v)", key, time.Since(startTime))
+	ctr.log.Info(fmt.Sprintf("starting to sync fastpod %q (%v)", key, time.Since(startTime)))
 	defer func() {
-		klog.Infof("Finished syncing FaSTPod %q (%v)", key, time.Since(startTime))
+		ctr.log.Info(fmt.Sprintf("finished syncing fastpod %q (%v)", key, time.Since(startTime)))
 	}()
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("Error invalid resource key = %s.", key))
+		utilruntime.HandleError(fmt.Errorf("error invalid resource key = %s", key))
 		return nil
 	}
 	// //KONTON_TEST
@@ -299,14 +302,14 @@ func (ctr *Controller) syncHandler(key string) error {
 	fastpod, err := ctr.fastpodsLister.FaSTPods(namespace).Get(name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			utilruntime.HandleError(fmt.Errorf("Error FaSTPod '%s' is no longer existed when syncing it.", key))
+			utilruntime.HandleError(fmt.Errorf("error fastpod '%s' is no longer existed when syncing it", key))
 			return nil
 		}
 		return err
 	}
 
 	if fastpod.Spec.Replicas == nil {
-		klog.Infof("Waiting FaSTPod %v/%v replicas to be updated ...", namespace, name)
+		ctr.log.Info(fmt.Sprintf("waiting fastpod %v/%v replicas to be updated ...", namespace, name))
 		return nil
 	}
 
@@ -352,17 +355,17 @@ func (ctr *Controller) syncHandler(key string) error {
 		utilruntime.HandleError(fmt.Errorf("error converting pod selector to selector for the fastpod %v/%v: %v", namespace, name, err))
 	}
 	if selector == nil {
-		klog.Errorf("Error the selector of fastpod %s/%s is till nil...", namespace, name)
+		ctr.log.Error(nil, fmt.Sprintf("error the selector of fastpod %s/%s is till nil...", namespace, name))
 		return nil
 	}
-	klog.Infof("KONTON_TEST: fastpod selector string: %s.", selector.String())
+	ctr.log.Info(fmt.Sprintf("konton_test: fastpod selector string: %s.", selector.String()))
 	// list pods of all FaSTPod
 	allPods_tmp, err := ctr.podsLister.Pods(namespace).List(selector)
 	if err != nil {
-		klog.Errorf("Error cannot get pods of the FaSTPod = %s.", key)
+		ctr.log.Error(err, fmt.Sprintf("error cannot get pods of the fastpod = %s.", key))
 		return err
 	}
-	klog.Infof("The total number of pods of the function %s = %d.", selector.String(), len(allPods_tmp))
+	ctr.log.Info(fmt.Sprintf("the total number of pods of the function %s = %d.", selector.String(), len(allPods_tmp)))
 	var allPods []*corev1.Pod
 	// only check the
 	for _, pod := range allPods_tmp {
@@ -370,11 +373,11 @@ func (ctr *Controller) syncHandler(key string) error {
 			allPods = append(allPods, pod)
 		}
 	}
-	klog.Infof("KONTON_TEST: Num of AllPods of FaSTPod %s = %d.", fastpod.Name, len(allPods))
+	ctr.log.Info(fmt.Sprintf("konton_test: num of allpods of fastpod %s = %d.", fastpod.Name, len(allPods)))
 
 	// Ignore inactive pods
 	filteredPods := filterInactivePods(allPods)
-	klog.Infof("The FaSTPod=%s/%s now has %d pods.", fastpodCopy.Namespace, fastpodCopy.Name, len(filteredPods))
+	ctr.log.Info(fmt.Sprintf("the fastpod=%s/%s now has %d pods.", fastpodCopy.Namespace, fastpodCopy.Name, len(filteredPods)))
 
 	// reconcile the quota resource configuration
 	syncReStatus := false
@@ -382,9 +385,9 @@ func (ctr *Controller) syncHandler(key string) error {
 	reqName := fastpodv1.FaSTGShareGPUQuotaRequest
 	limitName := fastpodv1.FaSTGShareGPUQuotaLimit
 	smName := fastpodv1.FaSTGShareGPUSMPartition
-	klog.Info("Checking if resource configurations change......")
+	ctr.log.Info("checking if resource configurations change......")
 	if fastpodCopy.Status.ResourceConfig == nil {
-		klog.Info("fastpodCopy.Status.ResourceConfig is null, start to create it ......")
+		ctr.log.Info("fastpodcopy.status.resourceconfig is null, start to create it ......")
 		syncReStatus = true
 		(*fastpodCopy.Status.ResourceConfig)[reqName] = fastpodCopy.ObjectMeta.Annotations[reqName]
 		(*fastpodCopy.Status.ResourceConfig)[limitName] = fastpodCopy.ObjectMeta.Annotations[limitName]
@@ -392,17 +395,17 @@ func (ctr *Controller) syncHandler(key string) error {
 	} else {
 		if (*fastpodCopy.Status.ResourceConfig)[reqName] != fastpodCopy.ObjectMeta.Annotations[reqName] ||
 			(*fastpodCopy.Status.ResourceConfig)[limitName] != fastpodCopy.ObjectMeta.Annotations[limitName] {
-			klog.Infof("GPU resource is Re-configured for the fastpod %s.", fastpodCopy.ObjectMeta.Name)
+			ctr.log.Info(fmt.Sprintf("gpu resource is re-configured for the fastpod %s.", fastpodCopy.ObjectMeta.Name))
 			manageReError = ctr.reconcileResourceConfig(filteredPods, fastpodCopy)
 			if manageReError != nil {
-				klog.Errorf("Error Failed to update the resource annoation for the pods of the fastpod %s.", fastpodCopy.ObjectMeta.Name)
+				ctr.log.Error(manageReError, fmt.Sprintf("error failed to update the resource annoation for the pods of the fastpod %s.", fastpodCopy.ObjectMeta.Name))
 
 			} else {
 				syncReStatus = true
 				(*fastpodCopy.Status.ResourceConfig)[reqName] = fastpodCopy.ObjectMeta.Annotations[reqName]
 				(*fastpodCopy.Status.ResourceConfig)[limitName] = fastpodCopy.ObjectMeta.Annotations[limitName]
 				(*fastpodCopy.Status.ResourceConfig)[smName] = fastpodCopy.ObjectMeta.Annotations[smName]
-				klog.Infof("The resource configurationof fastpod %s is updated.", fastpodCopy.ObjectMeta.Name)
+				ctr.log.Info(fmt.Sprintf("the resource configurationof fastpod %s is updated.", fastpodCopy.ObjectMeta.Name))
 			}
 		}
 	}
@@ -415,7 +418,7 @@ func (ctr *Controller) syncHandler(key string) error {
 	}
 	newStatus := getFaSTPodReplicaStatus(fastpodCopy, filteredPods, manageReplicasErr)
 
-	klog.Infof("AvailableReplicas: %d, ReadyReplicas: %d, Replicas: %d", newStatus.AvailableReplicas, newStatus.ReadyReplicas, newStatus.Replicas)
+	ctr.log.Info(fmt.Sprintf("availablereplicas: %d, readyreplicas: %d, replicas: %d", newStatus.AvailableReplicas, newStatus.ReadyReplicas, newStatus.Replicas))
 
 	var updatedFastpod *fastpodv1.FaSTPod
 	if fastpodCopy.Status.AvailableReplicas != *(fastpodCopy.Spec.Replicas) || fastpodCopy.Status.ReadyReplicas != *(fastpodCopy.Spec.Replicas) {
@@ -428,10 +431,10 @@ func (ctr *Controller) syncHandler(key string) error {
 	// other Status Check
 	// klog.Infof("KONTON_TEST: SyncReplica Status = %v.", syncReplica)
 	if syncReStatus || syncReplica {
-		klog.Infof("Sync Resource Status with Update.")
+		ctr.log.Info("sync resource status with update.")
 		updatedFastpod, err = ctr.fastpodClient.FastgshareV1().FaSTPods(fastpodCopy.Namespace).Update(context.TODO(), fastpodCopy, metav1.UpdateOptions{})
 		if err != nil {
-			klog.Error("Error FaSTPod update failed.")
+			ctr.log.Error(err, "error fastpod update failed.")
 			return err
 		}
 	}
@@ -442,7 +445,7 @@ func (ctr *Controller) syncHandler(key string) error {
 
 	if manageReplicasErr != nil && updatedFastpod.Status.ReadyReplicas == *(updatedFastpod.Spec.Replicas) &&
 		updatedFastpod.Status.AvailableReplicas != *(updatedFastpod.Spec.Replicas) {
-		klog.Infof("(enqueue fastpod from replicas check (func: syncHandler)) Re-enqueue the FaSTPod = %s.", updatedFastpod.Name)
+		ctr.log.Info(fmt.Sprintf("(enqueue fastpod from replicas check (func: synchandler)) re-enqueue the fastpod = %s.", updatedFastpod.Name))
 		ctr.enqueueFaSTPod(updatedFastpod)
 	}
 
@@ -453,7 +456,7 @@ func (ctr *Controller) syncHandler(key string) error {
 func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*corev1.Pod, fastpod *fastpodv1.FaSTPod, key string) (bool, error) {
 	syncReplica := false
 	diff := len(existedPods) - int(*(fastpod.Spec.Replicas))
-	klog.Infof("Current FaSTPod = %s has %d replicas with spec = %d, diff = %d.", key, len(existedPods), int(*(fastpod.Spec.Replicas)), diff)
+	ctr.log.Info(fmt.Sprintf("current fastpod = %s has %d replicas with spec = %d, diff = %d.", key, len(existedPods), int(*(fastpod.Spec.Replicas)), diff))
 
 	fstpKey, err := KeyFunc(fastpod)
 	if err != nil {
@@ -472,7 +475,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 		diff *= -1
 		syncReplica = true
 		ctr.expectations.ExpectCreations(fstpKey, diff)
-		klog.Infof("Not enough replicas for the FaSTPod ..., spec need %d replicas, try to create %d replicas", *fastpodCopy.Spec.Replicas, diff)
+		ctr.log.Info(fmt.Sprintf("not enough replicas for the fastpod ..., spec need %d replicas, try to create %d replicas", *fastpodCopy.Spec.Replicas, diff))
 		successedNum, err := slowStartbatch(diff, k8scontroller.SlowStartInitialBatchSize, func() (*corev1.Pod, error) {
 
 			request, err := getPodRequestFromPod(fastpodCopy)
@@ -483,25 +486,25 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			ok, err := validatePodRequest(request)
 			if err != nil || !ok {
 				ctr.recorder.Event(fastpod, corev1.EventTypeWarning, ErrValueError, "Invalid pod request")
-				klog.Errorf("Error invalid pod request: %s", err)
+				ctr.log.Error(err, fmt.Sprintf("error invalid pod request: %s", err))
 				//we dont care if the pod is invalid
 				return nil, nil
 			}
 
 			if request.AllocationType == types.AllocationTypeNone {
-				klog.Info("AllocationType is None, skip the pod creation.")
+				ctr.log.Info("allocationtype is none, skip the pod creation.")
 				return nil, nil
 			}
 
-			klog.Infof("Request for pod with resource %v", request)
+			ctr.log.Info(fmt.Sprintf("request for pod with resource %v", request))
 
 			selectionResult, err := ctr.ScheduleRequest(request)
 			if selectionResult == nil || err != nil {
-				klog.Infof("Error cannot find the best node for the fastpod %s. %s", key, err)
+				ctr.log.Info(fmt.Sprintf("error cannot find the best node for the fastpod %s. %s", key, err))
 				return nil, errors.New("NoSchedNodeAvailable")
 			}
 
-			klog.Infof("The pod of FaSTPod = %s is scheduled [AUTO/SPECIFIED] to the node = %s with vGPUID = %s", key, selectionResult.NodeName, selectionResult.VGPUUUID)
+			ctr.log.Info(fmt.Sprintf("the pod of fastpod = %s is scheduled [auto/specified] to the node = %s with vgpuid = %s", key, selectionResult.NodeName, selectionResult.VGPUUUID))
 
 			// generate the pod key for the new pod of FaSTPod
 			var subpodName string
@@ -521,7 +524,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			allocation, errCode := ctr.RequestGPUAndUpdateConfig(selectionResult, request, podKey)
 			selectedNode := selectionResult.NodeName
 
-			klog.Infof("KONTON_TEST: allocation = %v", allocation)
+			ctr.log.Info(fmt.Sprintf("konton_test: allocation = %v", allocation))
 
 			selectedGPU := selectionResult.VGPUUUID
 			// errCode 0: no error
@@ -532,7 +535,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			// errCode 5: No enough gpu client ports
 			switch errCode {
 			case 0:
-				klog.Infof("The pod is successfully bound.")
+				ctr.log.Info("the pod is successfully bound.")
 				fstp2Pods[fstpName].PushBack(newPodName)
 			case 1:
 				return nil, errors.New("NodeNotInitialized")
@@ -561,7 +564,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			}
 
 			// Create the new pod for the fastpod
-			klog.Infof("Starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key)
+			ctr.log.Info(fmt.Sprintf("starting to kube-create a new pod=%s for the fastpod=%s.", subpodName, key))
 
 			podParams := &NewPodParams{
 				PodName:      subpodName,
@@ -576,8 +579,8 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 
 			newpod, err := ctr.kubeClient.CoreV1().Pods(fastpodCopy.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 			if err != nil {
-				klog.Errorf("Error when creating pod=%s for the FaSTPod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name)
-				klog.Errorf("Error: %s", err)
+				ctr.log.Error(err, fmt.Sprintf("error when creating pod=%s for the fastpod=%s/%s. ", subpodName, fastpod.Namespace, fastpod.Name))
+				ctr.log.Error(err, fmt.Sprintf("error: %s", err))
 
 				//undo resource configuration
 
@@ -592,14 +595,14 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 			if allocation.MPSConfig != nil && allocation.MPSConfig.FastPodMPSConfig != nil {
 				(*fastpod.Status.GPUClientPort)[newpod.Name] = allocation.MPSConfig.FastPodMPSConfig.GpuClientPort
 			}
-			klog.Infof("Finished creating pod = %s.", subpodName)
+			ctr.log.Info(fmt.Sprintf("finished creating pod = %s.", subpodName))
 			return newpod, nil
 
 		})
 
 		// to do
 		if skippedPodsNum := diff - successedNum; skippedPodsNum > 0 {
-			klog.Infof("The controller does not create enough pod for FaSTPod=%s, created Number:%d, falied number:%d.", key, successedNum, diff-successedNum)
+			ctr.log.Info(fmt.Sprintf("the controller does not create enough pod for fastpod=%s, created number:%d, falied number:%d.", key, successedNum, diff-successedNum))
 			for i := 0; i < skippedPodsNum; i++ {
 
 				//Decrement the expected number of creates because the informer won't observe this pod
@@ -608,12 +611,12 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 		}
 		return syncReplica, err
 	} else if diff > 0 { // Too many Replicas, to delete pod to reconcile the spec
-		klog.V(2).Infof("Too many replicas for the FaSTPod ... \n need %d replicas, try to delete %d replicas", *fastpodCopy.Spec.Replicas, diff)
+		ctr.log.V(2).Info(fmt.Sprintf("too many replicas for the fastpod ... \n need %d replicas, try to delete %d replicas", *fastpodCopy.Spec.Replicas, diff))
 		podsToDelete := ctr.getPodsToDelete(existedPods, diff)
 		syncReplica = true
 
 		if podsToDelete == nil {
-			klog.V(2).Infof("The number of pods=%d to delete exceeds the existed pods=%d.", diff, len(existedPods))
+			ctr.log.V(2).Info(fmt.Sprintf("the number of pods=%d to delete exceeds the existed pods=%d.", diff, len(existedPods)))
 		}
 
 		ctr.expectations.ExpectDeletions(key, getPodKeys(podsToDelete))
@@ -633,7 +636,7 @@ func (ctr *Controller) reconcileReplicas(ctx context.Context, existedPods []*cor
 					podKey := k8scontroller.PodKey(targetPod)
 					ctr.expectations.DeletionObserved(key, podKey)
 					if !apierrors.IsNotFound(err) {
-						klog.Infof("Failed to delete pod=%s of the FaSTPod=%s.", podKey, key)
+						ctr.log.Info(fmt.Sprintf("failed to delete pod=%s of the fastpod=%s.", podKey, key))
 						errCh <- err
 					}
 				}
@@ -666,28 +669,28 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
 		node, ok := nodes[nodeName]
 		if !ok {
-			klog.Errorf("Error failed to get node information for the pod %s.", pod.ObjectMeta.Name)
+			ctr.log.Error(nil, fmt.Sprintf("error failed to get node information for the pod %s.", pod.ObjectMeta.Name))
 			continue
 		}
 		gpuInfo, ok := node.vGPUID2GPU[vgpuID]
 		if !ok {
-			klog.Errorf("Error failed to get gpu information information for the pod %s.", pod.ObjectMeta.Name)
+			ctr.log.Error(nil, fmt.Sprintf("error failed to get gpu information information for the pod %s.", pod.ObjectMeta.Name))
 			continue
 		}
 		// Get the key of the pod
 		key, err := cache.MetaNamespaceKeyFunc(pod)
 		if err != nil {
-			klog.Errorf("Error getting key: %v\n", err)
+			ctr.log.Error(err, fmt.Sprintf("error getting key: %v\n", err))
 			continue
 		}
 		podreq, isFound := FindInQueue(key, gpuInfo.FastPodList)
 		if !isFound {
-			klog.Errorf("Error failed to get pod information information for the pod %s.", pod.ObjectMeta.Name)
+			ctr.log.Error(nil, fmt.Sprintf("error failed to get pod information information for the pod %s.", pod.ObjectMeta.Name))
 			continue
 		}
 		resourceValid := ctr.resourceValidityCheck(pod)
 		if !resourceValid {
-			klog.Errorf("Error Resource Configuration for the pod %s is invalid.", pod.ObjectMeta.Name)
+			ctr.log.Error(nil, fmt.Sprintf("error resource configuration for the pod %s is invalid.", pod.ObjectMeta.Name))
 			continue
 		}
 		podreq.QtRequest, _ = strconv.ParseFloat(fastpod.ObjectMeta.Annotations[reqName], 64)
@@ -703,8 +706,8 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 		podcpy.Annotations[smName] = fastpod.ObjectMeta.Annotations[smName]
 		_, err = ctr.kubeClient.CoreV1().Pods(podcpy.Namespace).Update(context.TODO(), podcpy, metav1.UpdateOptions{})
 		if err != nil {
-			tmperr := fmt.Errorf("Error Failed to update the resource annotation of the pod %s.", podcpy.ObjectMeta.Name)
-			klog.Error(tmperr)
+			tmperr := fmt.Errorf("error failed to update the resource annotation of the pod %s", podcpy.ObjectMeta.Name)
+			ctr.log.Error(tmperr, "")
 			return tmperr
 		}
 	}
@@ -778,7 +781,7 @@ func (ctr *Controller) handleDeletedFaSTPod(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("handleDeletedFaSTPod: cannot parse object"))
 		return
 	}
-	klog.Infof("Starting to delete pods of fastpod %s/%s", fastpod.Namespace, fastpod.Name)
+	ctr.log.Info(fmt.Sprintf("starting to delete pods of fastpod %s/%s", fastpod.Namespace, fastpod.Name))
 	go ctr.removeFaSTPodFromList(fastpod)
 }
 
@@ -800,7 +803,7 @@ func (ctr *Controller) handleObject(obj interface{}) {
 			utilruntime.HandleError(fmt.Errorf("Error decoding object tombstone, invalid type, type = %T", tombstone.Obj))
 			return
 		}
-		klog.V(4).Info("Recovered deleted object", "resourceName", object.GetName())
+		ctr.log.V(4).Info(fmt.Sprintf("recovered deleted object, resourcename: %s", object.GetName()))
 	}
 
 	// TODO logic to handle dummyPod if the status is "PodFailed"
@@ -811,14 +814,14 @@ func (ctr *Controller) handleObject(obj interface{}) {
 		if ownerRef.Kind != fastpodKind {
 			return
 		}
-		klog.Info("Processing object = ", klog.KObj(object))
+		ctr.log.Info(fmt.Sprintf("processing object = %s", object.GetName()))
 		fastpod, err := ctr.fastpodsLister.FaSTPods(object.GetNamespace()).Get(ownerRef.Name)
 		if err != nil {
-			klog.Infof("Ignoring orphaned object '%s' of FaSTPod '%s'", object.GetSelfLink(), ownerRef.Name)
+			ctr.log.Info(fmt.Sprintf("ignoring orphaned object '%s' of fastpod '%s'", object.GetSelfLink(), ownerRef.Name))
 			return
 		}
 		// klog.Infof("The pod=%s of the FaSTPod = %s is to be processed ...", object.GetName(), ownerRef.Name)
-		klog.Info("re-enqueue fastpod from pod update (func: handleObject)")
+		ctr.log.Info("re-enqueue fastpod from pod update (func: handleObject)")
 		ctr.enqueueFaSTPod(fastpod)
 		return
 	}
