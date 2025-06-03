@@ -5,8 +5,11 @@ import (
 	"log"
 	"net"
 
+	"context"
+
 	"github.com/KontonGu/FaST-GShare/pkg/proto/seti/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
 )
 
 type ConfigurationServerParams struct{}
@@ -24,13 +27,33 @@ type Server struct {
 	manager    *ResourceManager
 }
 
+func loggingUnaryInterceptor(
+	ctx context.Context,
+	req interface{},
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (interface{}, error) {
+	p, _ := peer.FromContext(ctx)
+	log.Printf("gRPC call: %s, from: %v, request: %+v", info.FullMethod, p, req)
+	resp, err := handler(ctx, req)
+	if err != nil {
+		log.Printf("gRPC error: %s, error: %v", info.FullMethod, err)
+	}
+	return resp, err
+}
+
 func NewServer(port string) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			loggingUnaryInterceptor,
+			// add more interceptors here
+		),
+	)
 
 	server := &Server{
 		grpcServer: grpcServer,

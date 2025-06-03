@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"k8s.io/klog/v2"
 )
 
 // MPSServer represents an NVIDIA Multi-Process Service server instance
@@ -121,11 +119,9 @@ func (m *MPSServer) StartMPSDaemon() error {
 	// }
 
 	m.isEnabled = true
-	log.Printf("MPS daemon started for GPU %s (%s). Environment: %v",
-		m.Name, m.UUID, env)
+	log.Printf("MPS daemon started for GPU %s (%s)",
+		m.Name, m.UUID)
 
-	klog.Infof("klog:MPS daemon started for GPU %s (%s). Environment: %v",
-		m.Name, m.UUID, env)
 	return nil
 }
 
@@ -134,7 +130,7 @@ func (m *MPSServer) StartMPSDaemon() error {
 func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
 	pipeDir := m.GetPipeDir() // e.g. "/tmp/mps_<UUID>"
 	controlPipe := fmt.Sprintf("%s/control", pipeDir)
-	fi, err := os.Stat(controlPipe)
+	_, err := os.Stat(controlPipe)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// pipe isn’t there → daemon not running for this GPU
@@ -142,11 +138,11 @@ func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
 		}
 		return false, fmt.Errorf("failed to stat %s: %w", controlPipe, err)
 	}
-	if fi.Mode()&os.ModeNamedPipe == 0 {
-		log.Printf("Warning: %s exists but isn’t a pipe", controlPipe)
-		// exists but isn’t a pipe
-		return false, nil
-	}
+	// if fi.Mode()&os.ModeNamedPipe == 0 {
+	// 	log.Printf("Warning: %s exists but isn’t a pipe", controlPipe)
+	// 	// exists but isn’t a pipe
+	// 	return false, nil
+	// }
 
 	return true, nil
 }

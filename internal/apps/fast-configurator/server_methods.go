@@ -60,10 +60,6 @@ func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
 
 // GetAvailableGPUs returns a list of available GPUs
 func (s *ConfiguratorServer) GetAvailableGPUs(ctx context.Context, in *seti.GetAvailableGPUsRequest) (*seti.GetAvailableGPUsResponse, error) {
-	log.Printf("Received request for available GPUs: %v", in)
-	// TODO: Implement actual GPU detection logic
-
-	//sample gpus
 
 	virtuals := s.manager.getAvailableVirtualResources()
 
@@ -87,7 +83,6 @@ func (s *ConfiguratorServer) GetHealth(ctx context.Context, in *seti.GetHealthRe
 
 // RequestVirtualGPU allocates a virtual GPU with the specified requirements
 func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.RequestVirtualGPURequest) (*seti.RequestVirtualGPUResponse, error) {
-	log.Printf("Received request for virtual GPU: %v", in)
 
 	var vgpu *VirtualGPU
 	var err error
@@ -134,8 +129,6 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 
 	}
 
-	log.Printf("vgpu created with uuid: %s", vgpu.ProvisionedGPU.UUID)
-
 	// Build the response
 	response := &seti.RequestVirtualGPUResponse{
 		Id:                  vgpu.ID,
@@ -177,7 +170,6 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 
 // ReleaseVirtualGPU releases a previously allocated virtual GPU
 func (s *ConfiguratorServer) ReleaseVirtualGPU(ctx context.Context, in *seti.ReleaseVirtualGPURequest) (*seti.ReleaseVirtualGPUResponse, error) {
-	log.Printf("Received request to release virtual GPU: %v", in)
 
 	// Find the virtual GPU by ID
 
@@ -214,7 +206,6 @@ func (s *ConfiguratorServer) ReleaseVirtualGPU(ctx context.Context, in *seti.Rel
 
 // EnableMPS enables MPS for a specific GPU device
 func (s *ConfiguratorServer) EnableMPS(ctx context.Context, in *seti.EnableMPSRequest) (*seti.EnableMPSResponse, error) {
-	log.Printf("Received request to enable MPS for device: %s", in.DeviceUuid)
 
 	// Find the GPU by UUID
 	vgpu := s.manager.provisionedGPUs[in.DeviceUuid]
@@ -251,7 +242,6 @@ func (s *ConfiguratorServer) EnableMPS(ctx context.Context, in *seti.EnableMPSRe
 
 // DisableMPS disables MPS for a specific GPU device
 func (s *ConfiguratorServer) DisableMPS(ctx context.Context, in *seti.DisableMPSRequest) (*seti.DisableMPSResponse, error) {
-	log.Printf("Received request to disable MPS for device: %s", in.DeviceUuid)
 
 	vgpu := s.manager.provisionedGPUs[in.DeviceUuid]
 	if vgpu == nil {
@@ -286,8 +276,6 @@ func (s *ConfiguratorServer) DisableMPS(ctx context.Context, in *seti.DisableMPS
 
 // UpdateMPSConfigs updates MPS configurations for a device with FastPod GPU configurations
 func (s *ConfiguratorServer) UpdateMPSConfigs(ctx context.Context, in *seti.UpdateMPSConfigsRequest) (*seti.UpdateMPSConfigsResponse, error) {
-	log.Printf("Received request to update MPS configs for device: %s with %d FastPod configs",
-		in.DeviceUuid, len(in.FastpodGpuConfigs))
 
 	_, ok := s.manager.provisionedGPUs[in.DeviceUuid]
 	if !ok {

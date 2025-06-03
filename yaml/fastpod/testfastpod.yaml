@@ -6,18 +6,18 @@ metadata:
   annotations: 
     fastgshare/gpu_quota_request: "0.7"
     fastgshare/gpu_quota_limit: "0.8"
-    fastgshare/gpu_sm_partition: "100"
+    fastgshare/gpu_sm_partition: "50"
     fastgshare/sm_count: "12"
     fastgshare/gpu_mem: "1000000000"
     fastgshare/allocation_type: "FASTPOD"
     fastgshare/nodeName: "atschulz7"
-    fastgshare/vgpu_id: "GPU-bbc97af9-b22d-b2a7-24df-20ecae287dab"
+    fastgshare/vgpu_id: "GPU-5b6ec351-6067-def5-6148-17bbe9ac6a64"
 spec:
   replicas: 1
   podSpec:
     containers:
     - name: resnet-pytorch
-      image: docker.io/kontonpuku666/mlperf-resnet:pytorch
+      image: ishworgiri/resnet:pytorch
       
       # env:
       #   - name: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE

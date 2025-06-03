@@ -37,7 +37,6 @@ func initFiles() error {
 }
 
 func handleMsg(parsedConfig types.UpdatePodsGPUConfigMessage) {
-	klog.Infof("Received message from fastpod-controller-manager: %v", parsedConfig)
 
 	uuid := parsedConfig.GpuUUID
 
