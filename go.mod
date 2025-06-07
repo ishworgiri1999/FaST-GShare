@@ -7,6 +7,7 @@ toolchain go1.24.1
 require (
 	entgo.io/ent v0.14.4
 	github.com/NVIDIA/go-nvml v0.12.4-0
+	github.com/go-logr/logr v1.4.2
 	github.com/gocelery/gocelery v0.0.0-20201111034804-825d89059344
 	github.com/gomodule/redigo v2.0.0+incompatible
 	github.com/google/uuid v1.6.0
@@ -27,7 +28,7 @@ require (
 	k8s.io/klog v1.0.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubernetes v1.26.2
-	k8s.io/sample-controller v0.0.0-00010101000000-000000000000
+	k8s.io/sample-controller v0.33.1
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 )
 
@@ -44,7 +45,6 @@ require (
 	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
