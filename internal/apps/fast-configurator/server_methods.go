@@ -263,10 +263,6 @@ func (s *ConfiguratorServer) DisableMPS(ctx context.Context, in *seti.DisableMPS
 		vgpu.ProvisionedGPU.mpsServer.isEnabled = false
 	}
 
-	if err := vgpu.ProvisionedGPU.mpsServer.CleanupDirectories(); err != nil {
-		log.Printf("Warning: failed to clean up MPS directories: %v", err)
-	}
-
 	return &seti.DisableMPSResponse{
 		Success: true,
 		Message: fmt.Sprintf("Successfully disabled MPS for device %s", in.DeviceUuid),

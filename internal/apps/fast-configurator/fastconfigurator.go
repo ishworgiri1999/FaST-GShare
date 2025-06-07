@@ -262,6 +262,7 @@ func sendNodeHeartbeats(conn net.Conn, heartTick <-chan time.Time, connectionClo
 	}
 }
 
+// depricated
 func recvMsgAndWriteConfig(reader *bufio.Reader) {
 	klog.Infof("Receiving Resource and Port Configuration from fastpod-controller-manager. \n")
 	for {

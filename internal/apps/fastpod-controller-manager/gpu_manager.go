@@ -283,7 +283,7 @@ func (ctr *Controller) RequestGPUAndUpdateConfig(selectionResult *SelectionResul
 // remove pod information in the nodesInfo and update the pods configuration file with the function updatePodsGPUConfig
 func (ctr *Controller) removePodFromList(fastpod *fastpodv1.FaSTPod, pod *corev1.Pod) {
 	nodeName := pod.Spec.NodeName
-	vGPUID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
+	vGPUID := pod.Annotations[fastpodv1.FaSTGShareVGPUUUID]
 	allocationType := types.GetAllocationType(pod.Annotations[fastpodv1.FastGshareAllocationType])
 	key := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 
@@ -402,7 +402,7 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 	for _, pod := range pods {
 		klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", pod.Name, fastpod.Name)
 		nodeName := pod.Spec.NodeName
-		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
+		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUUUID]
 		key := fmt.Sprintf("%s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 		allocationType := types.GetAllocationType(pod.Annotations[fastpodv1.FastGshareAllocationType])
 

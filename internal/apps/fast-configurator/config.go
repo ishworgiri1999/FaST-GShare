@@ -1,13 +1,28 @@
 package fastconfigurator
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 var SmMap = map[string]int{
-	"NVIDIA T1000":          16,
-	"NVIDIA A100-PCIE-40GB": 108,
+	"t1000": 16,
+	"a100":  108,
+	"v100":  84,
 }
 
-func GetSMCount(gpuName string) (int, error) {
+func GetSMCount(gpuNameFull string) (int, error) {
+
+	gpuName := strings.ToLower(gpuNameFull)
+
+	if strings.Contains(gpuName, "a100") {
+		gpuName = "a100"
+	} else if strings.Contains(gpuName, "v100") {
+		gpuName = "v100"
+	} else if strings.Contains(gpuName, "t1000") {
+		gpuName = "t1000"
+	}
+
 	// Use the nvidia-smi command to get the SM count
 	smCount, exists := SmMap[gpuName]
 	if !exists {

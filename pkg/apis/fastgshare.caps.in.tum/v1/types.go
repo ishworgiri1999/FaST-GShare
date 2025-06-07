@@ -34,10 +34,10 @@ const (
 
 	FaSTGShareGPUMemory        = "fastgshare/gpu_mem"
 	FastGshareAllocationType   = "fastgshare/allocation_type" // MPS, FASTPOD, EXCLUSIVE
-	FaSTGShareVGPUID           = "fastgshare/vgpu_id"
+	FaSTGShareVGPUUUID         = "fastgshare/vgpu_uuid"
 	FaSTGShareVGPUType         = "fastgshare/vgpu_type"
 	FaSTGShareGPUsINfo         = "fastgshare/gpu_info"
-	FaSTGShareNodeName         = "fastgshare/nodeName"
+	FaSTGShareNodeName         = "fastgshare/node_name"
 	FaSTGShareRole             = "fastgshare/role"
 	FaSTGShareDummyPodName     = "fastgshare-vgpu"
 	FaSTGShareDummyPodUUID     = "fastgshare/vgpu_uuid"

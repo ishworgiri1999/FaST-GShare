@@ -100,10 +100,10 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 						Name:  "GPU_CLIENT_PORT",
 						Value: fmt.Sprintf("%d", params.MPSConfig.FastPodMPSConfig.GpuClientPort),
 					},
-				// corev1.EnvVar{
-				// 	Name:  "LD_PRELOAD",
-				// 	Value: FaSTPodLibraryDir + "/libfast.so.1_with_debug",
-				// }
+					corev1.EnvVar{
+						Name:  "LD_PRELOAD",
+						Value: FaSTPodLibraryDir + "/libfast.so.1",
+					},
 				)
 			}
 		}
@@ -172,7 +172,7 @@ func (ctr *Controller) newPod(fastpod *fastpodv1.FaSTPod, params *NewPodParams) 
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaRequest] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaRequest]
 	annotationCopy[fastpodv1.FaSTGShareGPUQuotaLimit] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUQuotaLimit]
 	annotationCopy[fastpodv1.FaSTGShareGPUMemory] = fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareGPUMemory]
-	annotationCopy[fastpodv1.FaSTGShareVGPUID] = params.SchedvGPUID
+	annotationCopy[fastpodv1.FaSTGShareVGPUUUID] = params.SchedvGPUID
 	annotationCopy[fastpodv1.FastGshareAllocationType] = fastpod.ObjectMeta.Annotations[fastpodv1.FastGshareAllocationType]
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -214,7 +214,7 @@ func getPodRequestFromPod(fastpod *fastpodv1.FaSTPod) (*ResourceRequest, error) 
 
 	node := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareNodeName]
 	vgpuType := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUType]
-	vgpuUUID := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUID]
+	vgpuUUID := fastpod.ObjectMeta.Annotations[fastpodv1.FaSTGShareVGPUUUID]
 
 	allocationTypeValue := types.GetAllocationType(allocationType)
 

@@ -23,6 +23,17 @@ func (m *MPSServer) SetupMPSEnvironment() error {
 		log.Printf("MPS daemon already started for GPU %s: %s", m.Name, m.UUID)
 		return nil
 	}
+
+	// check if the mps daemon is running for the given UUID
+	running, err := m.IsMPSDaemonRunning()
+	if err != nil {
+		return fmt.Errorf("failed to check if MPS daemon is running: %w", err)
+	}
+	if running {
+		log.Printf("MPS daemon already running for GPU %s: %s", m.Name, m.UUID)
+		return nil
+	}
+
 	if err := m.CreateDirectories(); err != nil {
 		return fmt.Errorf("failed to create MPS directories: %w", err)
 	}
@@ -130,7 +141,7 @@ func (m *MPSServer) StartMPSDaemon() error {
 func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
 	pipeDir := m.GetPipeDir() // e.g. "/tmp/mps_<UUID>"
 	controlPipe := fmt.Sprintf("%s/control", pipeDir)
-	_, err := os.Stat(controlPipe)
+	fi, err := os.Stat(controlPipe)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// pipe isn’t there → daemon not running for this GPU
@@ -138,11 +149,11 @@ func (m *MPSServer) IsMPSDaemonRunning() (bool, error) {
 		}
 		return false, fmt.Errorf("failed to stat %s: %w", controlPipe, err)
 	}
-	// if fi.Mode()&os.ModeNamedPipe == 0 {
-	// 	log.Printf("Warning: %s exists but isn’t a pipe", controlPipe)
-	// 	// exists but isn’t a pipe
-	// 	return false, nil
-	// }
+	if fi.Mode()&os.ModeNamedPipe == 0 {
+		log.Printf("Warning: %s exists but isn’t a pipe", controlPipe)
+		// exists but isn’t a pipe
+		return false, nil
+	}
 
 	return true, nil
 }

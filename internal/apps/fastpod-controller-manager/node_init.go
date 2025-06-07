@@ -259,7 +259,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	// update pods' gpu resource configuration to configurator
 	// nodesInfoMtx.Lock()
 	// for vgpuID, gpuDevInfo := range nodesInfo[nodeName].vGPUID2GPU {
-	// 	klog.Infof("updatePodsGPUConfig started. vgpu_id = %s.", vgpuID)
+	// 	klog.Infof("updatePodsGPUConfig started. vgpu_uuid = %s.", vgpuID)
 	// 	ctr.updatePodsGPUConfig(nodeName, gpuDevInfo.UUID, gpuDevInfo.PodList)
 	// }
 	// nodesInfoMtx.Unlock()

@@ -666,7 +666,7 @@ func (ctr *Controller) reconcileResourceConfig(existedPods []*corev1.Pod, fastpo
 	for _, pod := range existedPods {
 		// configure the new resource via the fast-configurator
 		nodeName := pod.Spec.NodeName
-		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUID]
+		vgpuID := pod.Annotations[fastpodv1.FaSTGShareVGPUUUID]
 		node, ok := nodes[nodeName]
 		if !ok {
 			ctr.log.Error(nil, fmt.Sprintf("error failed to get node information for the pod %s.", pod.ObjectMeta.Name))

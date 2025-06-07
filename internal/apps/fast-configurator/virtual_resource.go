@@ -3,6 +3,7 @@ package fastconfigurator
 import (
 	"fmt"
 	"log"
+	"math"
 	"sync"
 
 	"github.com/KontonGu/FaST-GShare/pkg/mig"
@@ -106,7 +107,11 @@ func NewResourceManager() (*ResourceManager, error) {
 	gpus := rm.getAvailableVirtualResources()
 	rm.VirtualGPUs = gpus
 
-	klog.Infof("Found %d virtual GPUs", len(gpus))
+	for _, vGPU := range gpus {
+		klog.Infof("vGPU: %s: smPercentage: %d", vGPU.ID, vGPU.SMPercentage)
+	}
+
+	klog.Infof("Found %d available(provisioned+unprovisioned) GPUs", len(gpus))
 	klog.Infof("Found %d physical GPUs", len(rm.PhysicalGPUs))
 	klog.Infof("Found %d provisioned GPUs", len(rm.provisionedGPUs))
 	return rm, nil
@@ -162,18 +167,24 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 		// Check MIG capability
 		currentMode, _, ret := device.GetMigMode()
+		smCount, err := GetSMCount(physicalGPUName)
+		if err != nil {
+			log.Printf("Warning: Could not get SM count for GPU %s: %v. Using default of 0.", physicalGPUName, err)
+			//if mig skip
+			// if mig enabled, smCount is required
+			if currentMode == nvml.DEVICE_MIG_ENABLE {
+				log.Printf("Warning: Could not get SM count for GPU %s: %v. Skipping.", physicalGPUName, err)
+				continue
+			}
+
+			smCount = 0 // Default to a reasonable value for modern GPUs
+		}
 
 		if ret == nvml.ERROR_NOT_SUPPORTED || (ret == nvml.SUCCESS && currentMode != nvml.DEVICE_MIG_ENABLE) {
 			if ret == nvml.ERROR_NOT_SUPPORTED {
 				log.Printf("MIG not supported for GPU %d (%s). Creating a non-MIG virtual GPU.", i, physicalGPUName)
 			} else {
 				log.Printf("MIG not enabled for GPU %d (%s). Creating a non-MIG virtual GPU.", i, physicalGPUName)
-			}
-
-			smCount, err := GetSMCount(physicalGPUName)
-			if err != nil {
-				log.Printf("Warning: Could not get SM count for GPU %s: %v. Using default of 0.", physicalGPUName, err)
-				smCount = 0 // Default to a reasonable value for modern GPUs
 			}
 
 			// Safely check if the GPU is already provisioned
@@ -217,20 +228,11 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			continue
 		}
 
-		// if currentMode != nvml.DEVICE_MIG_ENABLE {
-		// 	log.Printf("Warning: MIG not enabled for GPU %d, skipping", i)
-		// 	continue
-		// }
-
 		migCount, ret := device.GetMaxMigDeviceCount()
 		if ret != nvml.SUCCESS {
 			log.Printf("Warning: Could not get MIG device count for GPU %d: %v", i, ret)
 			continue
 		}
-
-		klog.Info("migCount: ", migCount)
-
-		klog.Infof("MIG device count for GPU %d: %d", i, migCount)
 
 		for j := 0; j < migCount; j++ {
 			migDevice, ret := device.GetMigDeviceHandleByIndex(j)
@@ -271,8 +273,6 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 
 			gpuInstanceID, ret := migDevice.GetGpuInstanceId()
 
-			log.Printf("gpu instance id %d", gpuInstanceID)
-			log.Printf("compute instance id %d", computeInstanceID)
 			if ret != nvml.SUCCESS {
 				log.Printf("Warning: Could not get GPU instance ID for MIG device %d, index %d: %v", i, j, ret)
 				continue
@@ -331,7 +331,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				IsProvisioned:   true,
 				DeviceIndex:     i,
 				PhysicalGPUType: physicalGPUName,
-				SMPercentage:    int(atters.ComputeInstanceSliceCount) * 100 / int(migCount),
+				SMPercentage:    int(math.Round(float64(atters.ComputeInstanceSliceCount) * 100.0 / float64(smCount))),
 				ProvisionedGPU: &GPU{
 					UUID:                migDeviceUUID,
 					Name:                migDeviceName,
@@ -375,7 +375,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 			for j := 0; j < count; j++ {
 				vGPU := &VirtualGPU{
 					PhysicalGPUType:     physicalGPUName,
-					SMPercentage:        int(profile.SliceCount) * 100 / int(migCount),
+					SMPercentage:        int(math.Round(float64(profile.MultiprocessorCount) * 100.0 / float64(smCount))),
 					Name:                fmt.Sprintf("%s-mig-profile-%d", physicalGPUName, profile.Id),
 					ID:                  fmt.Sprintf("vgpu-%d-profile%d-%d", i, profile.Id, j),
 					DeviceIndex:         i,

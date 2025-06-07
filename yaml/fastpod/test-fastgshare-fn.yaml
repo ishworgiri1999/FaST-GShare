@@ -12,9 +12,8 @@ metadata:
     fastgshare/gpu_sm_partition: "20"
     fastgshare/gpu_mem: "100000000"
     fastgshare/allocation_type: "FASTPOD"
-
-    # fastgshare/nodeName: "kgpu1"
-    # fastgshare/vgpu_id: "m35e5w3a"
+    fastgshare/node_name: "kgpu1"
+    fastgshare/vgpu_uuid: "GPU-5b6ec351-6067-def5-6148-17bbe9ac6a64"
 spec:
   replicas: 1
   podSpec:
