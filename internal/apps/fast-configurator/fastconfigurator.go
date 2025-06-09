@@ -31,7 +31,7 @@ const (
 	GPUClientsIPFile        = "/fastpod/library/GPUClientsIP.txt"
 	FastSchedulerConfigDir  = "/fastpod/scheduler/config"
 	GPUClientsPortConfigDir = "/fastpod/scheduler/gpu_clients"
-	HeartbeatItv            = 60
+	HeartbeatItv            = 10
 	MaxConnRetries          = 15
 	RetryItv                = 10
 )

@@ -1,12 +1,12 @@
 apiVersion: fastgshare.caps.in.tum/v1
 kind: FaSTPod
 metadata:
-  name: test-whisper
+  name: test-resnet
   namespace: fast-gshare-fn
   annotations: 
     fastgshare/gpu_quota_request: "1.0"
     fastgshare/gpu_quota_limit: "1.0"
-    fastgshare/gpu_sm_partition: "10"
+    fastgshare/gpu_sm_partition: "5"
     fastgshare/gpu_mem: "1073741824"
     fastgshare/allocation_type: "FASTPOD"
     fastgshare/node_name: "i10se14"
@@ -15,8 +15,8 @@ spec:
   replicas: 10
   podSpec:
     containers:
-    - name: whisper-pytorch
-      image: ishworgiri/whisper
+    - name: resnet-pytorch
+      image: ishworgiri/resnet:pytorch
       imagePullPolicy: IfNotPresent
       # env:
       #   - name: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE

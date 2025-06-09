@@ -426,7 +426,8 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 							uuid := gpuInfo.UUID
 
 							// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
-							gpuInfo.Usage -= (float64(podreqValue.SMPartition) / 100.0)
+							usage := (float64(podreqValue.SMPartition) / 100.0) * podreqValue.QtRequest
+							gpuInfo.Usage -= usage
 
 							gpuInfo.UsageMem -= podreqValue.Memory
 							ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
