@@ -151,7 +151,7 @@ func maintainConnection(
 	}
 }
 
-func Run(controllerManagerAddress string, fastFuncControllerAddress string, mps bool) {
+func Run(controllerManagerAddress string, fastFuncControllerAddress string) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
 	server, err := NewServer("5001")
