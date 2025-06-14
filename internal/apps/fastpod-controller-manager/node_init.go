@@ -91,6 +91,12 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 		klog.Errorf("Error while getting the available GPUs from the node configurator.")
 	}
 
+	for _, gpu := range response.Gpus {
+		if gpu.ProvisionedGpu != nil {
+			klog.Infof("GPU: is provisioned: %v, gpu id: %v", gpu.ProvisionedGpu.Uuid, gpu.Id)
+		}
+	}
+
 	nodesInfoMtx.Lock()
 	if nodes[hostName] != nil {
 		klog.Info(nodes[hostName].vGPUID2GPU)

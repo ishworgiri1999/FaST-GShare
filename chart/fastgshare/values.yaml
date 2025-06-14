@@ -105,7 +105,7 @@ oidcAuthPlugin:
 gateway:
   #image: ghcr.io/openfaas/gateway:0.21.3
   #image: ghcr.io/openfaas/gateway:0.24.0
-  image: ghcr.io/interstellarss/gateway:v0.1.23 #KONTON_NEEDED_TO_CHANGE
+  image: ishworgiri/gateway:latest
   readTimeout: "65s"
   writeTimeout: "65s"
   upstreamTimeout: "60s" # Must be smaller than read/write_timeout
@@ -138,6 +138,12 @@ faasnetesPro:
 operatorPro:
   image: ghcr.io/openfaasltd/faas-netes:0.1.3
 
+faasnetes:
+  image: ghcr.io/openfaas/faas-netes:0.18.12
+  resources:
+    requests:
+      memory: "120Mi"
+      cpu: "100m"
 # OpenFaaS Pro
 # The values for queueWorkerPro are merged with those under
 # the "queueWorker" section

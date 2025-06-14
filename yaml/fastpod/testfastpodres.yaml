@@ -6,13 +6,13 @@ metadata:
   annotations: 
     fastgshare/gpu_quota_request: "1.0"
     fastgshare/gpu_quota_limit: "1.0"
-    fastgshare/gpu_sm_partition: "5"
-    fastgshare/gpu_mem: "1073741824"
-    fastgshare/allocation_type: "FASTPOD"
-    fastgshare/node_name: "i10se14"
-    fastgshare/vgpu_uuid: "GPU-c681a026-7f84-dafd-e970-6b191593230e"
+    fastgshare/gpu_sm_partition: "52"
+    fastgshare/gpu_mem: "2147483648"
+    fastgshare/allocation_type: "EXCLUSIVE"
+    fastgshare/node_name: "atschulz7"
+    fastgshare/vgpu_uuid: "MIG-d99e3a01-becd-5d26-82e0-35ace55b590c"
 spec:
-  replicas: 10
+  replicas: 1
   podSpec:
     containers:
     - name: resnet-pytorch

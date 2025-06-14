@@ -423,19 +423,16 @@ func (ctr *Controller) removeFaSTPodFromList(fastpod *fastpodv1.FaSTPod) {
 						if podreqValue.Key == key {
 							klog.Infof("Removing the pod = %s of the FaSTPod = %s ....", key, fastpod.Name)
 							podlist.Remove(podreq)
-							uuid := gpuInfo.UUID
-
-							// gpu.Usage -= podreqValue.QtRequest * (float64(podreqValue.SMPartition) / 100.0)
 							usage := (float64(podreqValue.SMPartition) / 100.0) * podreqValue.QtRequest
 							gpuInfo.Usage -= usage
 
 							gpuInfo.UsageMem -= podreqValue.Memory
-							ctr.updatePodsGPUConfig(nodeName, uuid, podlist)
 							node.DaemonPortAlloc.Clear(podreqValue.GPUClientPort - GPUClientPortStart)
 
 						}
-						break
 					}
+					//update the podsGPUConfig
+					ctr.updatePodsGPUConfig(nodeName, gpuInfo.UUID, podlist)
 
 				}
 

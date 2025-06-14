@@ -141,8 +141,19 @@ func (rm *ResourceManager) CleanUp() {
 	}
 }
 
+func (rm *ResourceManager) getAndSetAvailableVirtualResources() []*VirtualGPU {
+	rm.mutex.Lock()
+	defer rm.mutex.Unlock()
+
+	gpus := rm.getAvailableVirtualResources()
+	rm.VirtualGPUs = gpus
+
+	return gpus
+}
+
 // discoverVirtualResources creates virtual GPU resources based on physical GPU capabilities
 func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
+
 	var gpus []*VirtualGPU
 	for i, device := range rm.PhysicalGPUs {
 
@@ -331,7 +342,7 @@ func (rm *ResourceManager) getAvailableVirtualResources() []*VirtualGPU {
 				IsProvisioned:   true,
 				DeviceIndex:     i,
 				PhysicalGPUType: physicalGPUName,
-				SMPercentage:    int(math.Round(float64(atters.ComputeInstanceSliceCount) * 100.0 / float64(smCount))),
+				SMPercentage:    int(math.Round(float64(atters.MultiprocessorCount) * 100.0 / float64(smCount))),
 				ProvisionedGPU: &GPU{
 					UUID:                migDeviceUUID,
 					Name:                migDeviceName,

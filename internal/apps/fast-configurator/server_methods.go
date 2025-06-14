@@ -61,7 +61,7 @@ func mapToSetiVirtualGPU(vgpu *VirtualGPU) *seti.VirtualGPU {
 // GetAvailableGPUs returns a list of available GPUs
 func (s *ConfiguratorServer) GetAvailableGPUs(ctx context.Context, in *seti.GetAvailableGPUsRequest) (*seti.GetAvailableGPUsResponse, error) {
 
-	virtuals := s.manager.getAvailableVirtualResources()
+	virtuals := s.manager.getAndSetAvailableVirtualResources()
 
 	gpus := []*seti.VirtualGPU{}
 
@@ -96,10 +96,6 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 	} else {
 		return nil, fmt.Errorf("no profile ID or device UUID provided")
 
-	}
-
-	if vgpu == nil {
-		err = fmt.Errorf("no available virtual GPUs")
 	}
 
 	if err != nil {
@@ -143,25 +139,11 @@ func (s *ConfiguratorServer) RequestVirtualGPU(ctx context.Context, in *seti.Req
 	}
 
 	// Get the current available GPUs and add to response
-	availableGPUs := s.manager.getAvailableVirtualResources()
+	availableGPUs := s.manager.getAndSetAvailableVirtualResources()
 
 	for _, vg := range availableGPUs {
-		var provisionedGPU *seti.GPU
-		if vg.ProvisionedGPU != nil {
-			provisionedGPU = mapToSetiGPU(vg.ProvisionedGPU)
-		}
 
-		vGPU := &seti.VirtualGPU{
-			Id: vg.ID,
-
-			DeviceIndex:         int32(vg.DeviceIndex),
-			MemoryBytes:         vg.MemoryBytes,
-			MultiprocessorCount: int32(vg.MultiProcessorCount),
-			IsProvisioned:       vg.IsProvisioned,
-
-			ProvisionedGpu: provisionedGPU,
-		}
-		response.AvailableVirtualGpus = append(response.AvailableVirtualGpus, vGPU)
+		response.AvailableVirtualGpus = append(response.AvailableVirtualGpus, mapToSetiVirtualGPU(vg))
 
 	}
 
@@ -189,7 +171,7 @@ func (s *ConfiguratorServer) ReleaseVirtualGPU(ctx context.Context, in *seti.Rel
 		}, nil
 	}
 
-	availabe := s.manager.getAvailableVirtualResources()
+	availabe := s.manager.getAndSetAvailableVirtualResources()
 
 	var availableSetiVGpus []*seti.VirtualGPU
 	for _, vgpu := range availabe {
