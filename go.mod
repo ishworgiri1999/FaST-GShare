@@ -1,10 +1,12 @@
 module github.com/KontonGu/FaST-GShare
 
-go 1.24.1
+go 1.23
+
+toolchain go1.24.1
 
 require (
 	entgo.io/ent v0.14.4
-	github.com/NVIDIA/go-nvml v0.12.4-0
+	github.com/NVIDIA/go-nvml v0.12.0-1
 	github.com/go-logr/logr v1.4.2
 	github.com/gocelery/gocelery v0.0.0-20201111034804-825d89059344
 	github.com/gomodule/redigo v2.0.0+incompatible

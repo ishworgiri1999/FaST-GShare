@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -151,10 +152,10 @@ func maintainConnection(
 	}
 }
 
-func Run(controllerManagerAddress string, fastFuncControllerAddress string) {
+func Run(controllerManagerAddress string, fastFuncControllerAddress string, grpcPort int) {
 	klog.Infof("Starting FaST-GShare configurator...")
 
-	server, err := NewServer("5001")
+	server, err := NewServer(strconv.Itoa(grpcPort))
 	if err != nil {
 		klog.Fatalf("Error failed to create gRPC server: %v", err)
 		return

@@ -4,13 +4,14 @@ ARCH=linux/amd64
 GOOS?=linux
 GOARCH?=amd64
 
-CGO_ENABLED?=0
+CGO_ENABLED?=1
 CLI_VERSION_PACKAGE := main
 COMMIT ?= $(shell git describe --dirty --long --always --abbrev=15)
 # VERSION := $(shell cat ./VERSION)
 CGO_LDFLAGS_ALLOW := "-Wl,--unresolved-symbols=ignore-in-object-file"
 
-
+GIT_COMMIT := $(COMMIT)
+CLI_VERSION ?= 0.1.0
 
 .PHONY: clean_crd_gen
 clean_crd_gen:
@@ -57,20 +58,7 @@ PLATFORMS ?= linux/amd64
 build-fastpod-controller-manager-container:
 	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:release -f docker/fastpod-controller-manager/Dockerfile . --push
 
-.PHONY: test-build-fastpod-controller-manager-container
-test-build-fastpod-controller-manager-container:
-	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:controller_test -f docker/fastpod-controller-manager/Dockerfile . --push
 
-.PHONY: mps-test-fastpod-controller
-mps-test-fastpod-controller:
-	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:mps_test -f docker/fastpod-controller-manager/Dockerfile . --push
-
-.PHONY: resource-reconfig-test-fastpod-controller
-resource-reconfig-test-fastpod-controller:
-	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:reconfig_test -f docker/fastpod-controller-manager/Dockerfile . --push
 
 .PHONY: upload-fastpod-controller-manager-image
 upload-fastpod-controller-manager-image:
@@ -90,12 +78,14 @@ FAST_CONFIG_BINARY_NAME := fast-configurator
 .PHONY: fast-configurator
 fast-configurator:
 	@echo "Building module [fast-configurator] ..."
-	@cd $(FAST_CONFIG_BUILD_DIR) && CGO_LDFLAGS_ALLOW=$(CGO_LDFLAGS_ALLOW) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS)  \
-		go build  -ldflags="-extldflags=-Wl,-z,lazy" -o $(FAST_CONFIG_BINARY_NAME)
-	@echo "Build complete. Binary is located at $(FAST_CONFIG_OUTPUT_DIR)/$(FAST_CONFIGBINARY_NAME)"
+	@cd $(FAST_CONFIG_BUILD_DIR) && \
+	  CGO_LDFLAGS_ALLOW='-Wl,--unresolved-symbols=ignore-in-object-files' \
+	  CGO_ENABLED=1 GOOS=$(GOOS) \
+	  go build \
+	    -ldflags "-extldflags=-Wl,-z,lazy -s -w -X $(CLI_VERSION_PACKAGE).gitCommit=$(GIT_COMMIT) -X $(CLI_VERSION_PACKAGE).version=$(CLI_VERSION)" \
+	    -o $(FAST_CONFIG_BINARY_NAME)
+	@echo "Build complete. Binary is located at $(FAST_CONFIG_OUTPUT_DIR)/$(FAST_CONFIG_BINARY_NAME)"
 
-.PHONY: test-fast-configurator-container
-test-fast-configurator-container: build-fast-configurator-container upload-fast-configurator-image clean-ctr-fast-configurator-image
 
 .PHONY: build-fast-configurator-container
 build-fast-configurator-container:
@@ -150,10 +140,3 @@ helm_install_fast-gshare-fn:
 helm_uninstall_fast-gshare-fn:
 	helm uninstall fast-gshare --namespace fast-gshare
 	kubectl delete pod -l fastgshare/role=dummyPod -n kube-system
-
-
-run-controller:
-	go run cmd/fastpod-controller-manager/main.go -kubeconfig=$HOME/.kube/config
-
-run-configurator:
-	sudo ./main -ctr_mgr_ip_port localhost:10086
