@@ -1,7 +1,11 @@
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.22 as build
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.24 as build
 
-ENV GOLANG_VERSION 1.22.0
+ENV GOLANG_VERSION 1.24.0
 ENV PATH $PATH:/usr/local/go/bin
+
+ENV GO_OS=darwin
+ENV GO_ARCH=amd64
+ENV CGO_ENABLED=0
 
 WORKDIR /go/src/github.com/KontonGu/FaST-GShare
 

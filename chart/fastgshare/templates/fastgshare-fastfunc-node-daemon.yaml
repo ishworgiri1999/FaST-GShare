@@ -1,0 +1,113 @@
+{{- if .Values.createCRDs }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fastfunc-controller-manager
+  namespace: kube-system
+
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: fastfunc-controller-manager-role
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["caps.in.tum.fastgshare"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["caps.in.tum.fastgshare"]
+  resources: ["fastfuncs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["fastgshare.caps.in.tum"]
+  resources: ["fastpods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "namespaces", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fastfunc-controller-manager-role-binder
+subjects:
+- kind: ServiceAccount
+  name: fastfunc-controller-manager
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: fastfunc-controller-manager-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+{{- if eq .Values.fastfuncControllerManager.disable false }}
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastfunc-controller-manager-svc
+  namespace: kube-system
+spec:
+  type: ClusterIP
+  selector:
+    app: fastfunc-controller-manager
+  ports:
+  - protocol: TCP
+    port: 10088
+    targetPort: 10088
+
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fastfunc-controller-manager
+  namespace: kube-system
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "9090"
+  labels:
+    app: fastfunc-controller-manager
+spec:
+  serviceAccountName: fastfunc-controller-manager
+  priorityClassName: system-node-critical
+  tolerations:
+  - key: "CriticalAddonsOnly"
+    operator: "Exists"
+  - key: "node-role.kubernetes.io/master"
+    operator: "Exists"
+    effect: "NoSchedule"
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: "node-role.kubernetes.io/master"
+            operator: "Exists"
+  restartPolicy: Always
+  containers:
+  - name: fastfunc-controller-manager-container
+    #image: kontonpuku666/fastfunc-controller-manager:controller_test
+    image: {{ .Values.fastfuncControllerManager.image }}
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: kube-config
+      mountPath: /root/.kube/config
+      subPath: config
+  volumes:
+    - name: kube-config
+      configMap:
+        name: kube-config
+
+---
+
+{{- end }}

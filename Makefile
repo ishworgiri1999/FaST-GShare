@@ -1,5 +1,17 @@
 DOCKER_USER=docker.io/ishworgiri
 ARCH=linux/amd64
+
+GOOS?=linux
+GOARCH?=amd64
+
+CGO_ENABLED?=0
+CLI_VERSION_PACKAGE := main
+COMMIT ?= $(shell git describe --dirty --long --always --abbrev=15)
+# VERSION := $(shell cat ./VERSION)
+CGO_LDFLAGS_ALLOW := "-Wl,--unresolved-symbols=ignore-in-object-file"
+
+
+
 .PHONY: clean_crd_gen
 clean_crd_gen:
 	rm -r pkg/client && rm -r pkg/apis/fastgshare.caps.in.tum/v1/zz_generated.deepcopy.go
@@ -38,27 +50,27 @@ fastpod-controller-manager:
 	@cd $(CTR_MGR_BUILD_DIR) && go build -o $(CTR_MGR_BINARY_NAME)
 	@echo "Build complete. Binary is located at $(CTR_MGR_OUTPUT_DIR)/$(CTR_MGR_BINARY_NAME)"
 
+PLATFORMS ?= linux/amd64
+
+
 .PHONY: build-fastpod-controller-manager-container
 build-fastpod-controller-manager-container:
-	docker build -t ${DOCKER_USER}/fastpod-controller-manager:release -f docker/fastpod-controller-manager/Dockerfile .
+	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:release -f docker/fastpod-controller-manager/Dockerfile . --push
 
 .PHONY: test-build-fastpod-controller-manager-container
 test-build-fastpod-controller-manager-container:
 	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker build -t ${DOCKER_USER}/fastpod-controller-manager:controller_test -f docker/fastpod-controller-manager/Dockerfile .
-	docker push ${DOCKER_USER}/fastpod-controller-manager:controller_test 
+	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:controller_test -f docker/fastpod-controller-manager/Dockerfile . --push
 
 .PHONY: mps-test-fastpod-controller
 mps-test-fastpod-controller:
 	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker build -t ${DOCKER_USER}/fastpod-controller-manager:mps_test -f docker/fastpod-controller-manager/Dockerfile .
-	docker push ${DOCKER_USER}/fastpod-controller-manager:mps_test
+	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:mps_test -f docker/fastpod-controller-manager/Dockerfile . --push
 
 .PHONY: resource-reconfig-test-fastpod-controller
 resource-reconfig-test-fastpod-controller:
 	sudo ctr -n k8s.io i ls | grep ${DOCKER_USER}/fastpod-controller-manager | awk '{print $$1}' | xargs -I {} sudo ctr -n k8s.io i rm {}
-	docker build -t ${DOCKER_USER}/fastpod-controller-manager:reconfig_test -f docker/fastpod-controller-manager/Dockerfile .
-	docker push ${DOCKER_USER}/fastpod-controller-manager:reconfig_test
+	docker buildx build --platform=$(PLATFORMS) -t ${DOCKER_USER}/fastpod-controller-manager:reconfig_test -f docker/fastpod-controller-manager/Dockerfile . --push
 
 .PHONY: upload-fastpod-controller-manager-image
 upload-fastpod-controller-manager-image:
@@ -78,7 +90,8 @@ FAST_CONFIG_BINARY_NAME := fast-configurator
 .PHONY: fast-configurator
 fast-configurator:
 	@echo "Building module [fast-configurator] ..."
-	@cd $(FAST_CONFIG_BUILD_DIR) && go build -o $(FAST_CONFIG_BINARY_NAME)
+	@cd $(FAST_CONFIG_BUILD_DIR) && CGO_LDFLAGS_ALLOW=$(CGO_LDFLAGS_ALLOW) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS)  \
+		go build  -ldflags="-extldflags=-Wl,-z,lazy" -o $(FAST_CONFIG_BINARY_NAME)
 	@echo "Build complete. Binary is located at $(FAST_CONFIG_OUTPUT_DIR)/$(FAST_CONFIGBINARY_NAME)"
 
 .PHONY: test-fast-configurator-container
@@ -86,7 +99,7 @@ test-fast-configurator-container: build-fast-configurator-container upload-fast-
 
 .PHONY: build-fast-configurator-container
 build-fast-configurator-container:
-	docker build  --platform ${ARCH} -t ${DOCKER_USER}/fast-configurator:release -f docker/fast-configurator/Dockerfile .
+	docker buildx build --build-arg GOLANG_VERSION=1.24.1  --platform ${ARCH} --push -t ${DOCKER_USER}/fast-configurator:release -f docker/fast-configurator/Dockerfile .
 
 .PHONY: upload-fast-configurator-image
 upload-fast-configurator-image:
