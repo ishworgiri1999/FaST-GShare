@@ -4,20 +4,20 @@ metadata:
   name: test-whisper
   namespace: fast-gshare-fn
   annotations: 
-    fastgshare/gpu_quota_request: "0.5"
-    fastgshare/gpu_quota_limit: "0.5"
+    fastgshare/gpu_quota_request: "1.0"
+    fastgshare/gpu_quota_limit: "1.0"
     fastgshare/gpu_sm_partition: "52"
     fastgshare/gpu_mem: "1073741824"
-    fastgshare/allocation_type: "EXCLUSIVE"
+    fastgshare/allocation_type: "FASTPOD"
     fastgshare/node_name: "atschulz7"
-    fastgshare/vgpu_uuid: "MIG-d99e3a01-becd-5d26-82e0-35ace55b590c"
+    fastgshare/vgpu_uuid: "GPU-5b6ec351-6067-def5-6148-17bbe9ac6a64"
 spec:
   replicas: 1
   podSpec:
     containers:
     - name: whisper-pytorch
       image: ishworgiri/whisper
-      imagePullPolicy: IfNotPresent
+      imagePullPolicy: Always
       # env:
       #   - name: CUDA_MPS_ACTIVE_THREAD_PERCENTAGE
       #     value: "60"

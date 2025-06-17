@@ -6,9 +6,10 @@ import (
 )
 
 var SmMap = map[string]int{
-	"t1000": 16,
-	"a100":  108,
-	"v100":  84,
+	"t1000":     16,
+	"a100":      108,
+	"v100":      84,
+	"rtx2080ti": 68,
 }
 
 func GetSMCount(gpuNameFull string) (int, error) {
@@ -21,6 +22,8 @@ func GetSMCount(gpuNameFull string) (int, error) {
 		gpuName = "v100"
 	} else if strings.Contains(gpuName, "t1000") {
 		gpuName = "t1000"
+	} else if strings.Contains(gpuName, "rtx 2080") {
+		gpuName = "rtx2080ti"
 	}
 
 	// Use the nvidia-smi command to get the SM count
