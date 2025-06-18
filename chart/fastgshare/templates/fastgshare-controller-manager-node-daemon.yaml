@@ -148,6 +148,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: "FASTFUNC_IP_PORT"
+          value: "fastfunc-controller-manager-svc.kube-system.svc.cluster.local:10088"
       - name: fastpod-fastscheduler-ctn
         # image: kontonpuku666/fastpod-fastscheduler:release
         image: {{ .Values.fastgshareNodeDaemon.fastpodFastscheduler.image }}

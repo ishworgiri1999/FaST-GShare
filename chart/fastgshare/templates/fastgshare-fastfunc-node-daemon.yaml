@@ -98,6 +98,8 @@ spec:
   - name: fastfunc-controller-manager-container
     #image: kontonpuku666/fastfunc-controller-manager:controller_test
     image: {{ .Values.fastfuncControllerManager.image }}
+    command: ["/manager"]
+    args: ["-node-listener-address", "0.0.0.0:10088"]
     imagePullPolicy: IfNotPresent
     volumeMounts:
     - name: kube-config
