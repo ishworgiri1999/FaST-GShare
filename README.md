@@ -69,32 +69,3 @@ The deployment of the FaST-GShare-Function in this project does not include the 
 ## Build FaST-GShare from Scratch based on the Code (for further Developing)
 The detailed introduction to the FaST-GShare project's construction from the source code can be found in the `./develope` directory and [README](https://github.com/KontonGu/FaST-GShare/blob/main/develop/README.md).
 
-
-## Citation
-If you use FaST-GShare for your research, please cite our, please cite our paper [paper](https://dl.acm.org/doi/abs/10.1145/3605573.3605638):
-```
-@inproceedings{gu2023fast,
-  title={FaST-GShare: Enabling Efficient Spatio-Temporal GPU Sharing in Serverless Computing for Deep Learning Inference},
-  author={Gu, Jianfeng and Zhu, Yichao and Wang, Puxuan and Chadha, Mohak and Gerndt, Michael},
-  booktitle={Proceedings of the 52nd International Conference on Parallel Processing},
-  pages={635--644},
-  year={2023}
-}
-```
-
-
-## License
-Copyright 2024 FaST-GShare Authors, KontonGu (**Jianfeng Gu**), et. al.
-@Techinical University of Munich, **CAPS Cloud Team**
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
