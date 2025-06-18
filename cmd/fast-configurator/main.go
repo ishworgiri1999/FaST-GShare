@@ -43,6 +43,6 @@ func main() {
 
 func init() {
 	flag.StringVar(&ctr_mgr_ip_port, "ctr_mgr_ip_port", "fastpod-controller-manager-svc.kube-system.svc.cluster.local:10086", "The IP and Port to the FaST-GShare device manager.")
-	flag.StringVar(&fastfunc_ip_port, "fastfunc_ip_port", "fastfunc-svc.kube-system.svc.cluster.local:10088", "The IP and Port to the FaST-GShare function.")
+	flag.StringVar(&fastfunc_ip_port, "fastfunc_ip_port", "fastfunc-controller-manager-svc.kube-system.svc.cluster.local:10088", "The IP and Port to the FaST-GShare function.")
 	flag.IntVar(&grpc_port, "grpc_port", 5001, "The port to the gRPC server.")
 }

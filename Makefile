@@ -131,12 +131,10 @@ test-fast-gshare-faas-image: clean-fast-gshare-faas-image build-fast-gshare-faas
 
 
 ##------------------------------------ helm install the fast-gshare-fn system -------------------------------- ##
-.PHONY: helm_install_fast-gshare-fn
-helm_install_fast-gshare-fn:
-	helm install fast-gshare ./chart/fastgshare --namespace fast-gshare --set functionNamespace=fast-gshare-fn  \
-	--set  fastpodControllerManager.image="docker.io/kontonpuku666/fastpod-controller-manager:controller_test"
+.PHONY: install-helm
+install-helm:
+	helm install fast-gshare ./chart/fastgshare --namespace fast-gshare --set functionNamespace=fast-gshare-fn
 
-.PHONY: helm_uninstall_fast-gshare-fn
-helm_uninstall_fast-gshare-fn:
+.PHONY: uninstall-helm
+uninstall-helm:
 	helm uninstall fast-gshare --namespace fast-gshare
-	kubectl delete pod -l fastgshare/role=dummyPod -n kube-system
