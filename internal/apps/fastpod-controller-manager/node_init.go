@@ -46,6 +46,7 @@ func (ctr *Controller) handleNodeConnection(conn net.Conn) error {
 	if len(daemonPod.Spec.NodeName) > 0 {
 
 		nodeHostName = daemonPod.Spec.NodeName
+		nodeIP = daemonPod.Status.HostIP
 		klog.Infof("Node name is: %s", nodeHostName)
 	}
 
