@@ -42,7 +42,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
-{{- if eq .Values.fastpodControllerManager.disable false }}
+{{- if not .Values.fastpodControllerManager.disabled }}
 
 apiVersion: v1
 kind: Service
@@ -135,7 +135,9 @@ spec:
         # image: kontonpuku666/fast-configurator:release
         image: {{ .Values.fastgshareNodeDaemon.fastConfigurator.image }}
         imagePullPolicy: "Always"
-
+        ports:
+        - containerPort: 5001
+          hostPort: 5001
         volumeMounts:
         - name: fastpod-library
           mountPath: "/fastpod/library"

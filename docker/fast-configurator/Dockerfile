@@ -2,21 +2,21 @@ ARG GOLANG_VERSION=1.24.1
 FROM  nvidia/cuda:12.2.0-base-ubuntu22.04 AS build
 ARG GOLANG_VERSION
 
-RUN apt-get update && \
-    apt-get install -y wget make git gcc \
-    && \
-    rm -rf /var/lib/apt/lists/*
-RUN set -eux; \
-    \
-    arch="$(uname -m)"; \
-    case "${arch##*-}" in \
-        x86_64 | amd64) ARCH='amd64' ;; \
-        ppc64el | ppc64le) ARCH='ppc64le' ;; \
-        aarch64) ARCH='arm64' ;; \
-        *) echo "unsupported architecture" ; exit 1 ;; \
-    esac; \
-    wget -nv -O - https://storage.googleapis.com/golang/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
-    | tar -C /usr/local -xz
+# RUN apt-get update && \
+#     apt-get install -y wget make git gcc \
+#     && \
+#     rm -rf /var/lib/apt/lists/*
+# RUN set -eux; \
+#     \
+#     arch="$(uname -m)"; \
+#     case "${arch##*-}" in \
+#         x86_64 | amd64) ARCH='amd64' ;; \
+#         ppc64el | ppc64le) ARCH='ppc64le' ;; \
+#         aarch64) ARCH='arm64' ;; \
+#         *) echo "unsupported architecture" ; exit 1 ;; \
+#     esac; \
+#     wget -nv -O - https://storage.googleapis.com/golang/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
+#     | tar -C /usr/local -xz
 
 
 
@@ -26,13 +26,17 @@ ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
 WORKDIR /build
 
 
-COPY go.mod go.sum ./
+# COPY go.mod go.sum ./
 
-RUN go mod download
+# RUN go mod download
 
-COPY . .
+# COPY . .
 
-RUN make fast-configurator
+
+
+COPY ./main fast-configurator
+# executable probably there already
+# RUN make fast-configurator
 
 
 
