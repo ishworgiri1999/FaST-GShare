@@ -21,7 +21,7 @@ WORKDIR /
 COPY --from=build /workspace/manager .
 
 # CMD ["fastpodcontrollermanager", "-alsologtostderr", "-v=4"]
-CMD [ "/manager", "-alsologtostderr"]
+CMD [ "/manager", "-alsologtostderr", "-v=4"]
 
 
 

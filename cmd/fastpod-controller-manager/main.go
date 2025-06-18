@@ -43,9 +43,10 @@ import (
 )
 
 var (
-	masterURL  string
-	kubeconfig string
-	workerNum  int
+	masterURL     string
+	kubeconfig    string
+	workerNum     int
+	configNetAddr string
 )
 
 func main() {
@@ -105,7 +106,7 @@ func main() {
 	kubeInformerFactory.Start(stopCh)
 	fastpodInformerFactory.Start(stopCh)
 
-	if err = controller.Run(stopCh, workerNum); err != nil {
+	if err = controller.Run(stopCh, workerNum, configNetAddr); err != nil {
 		klog.Fatalf("Error running controller: %s", err.Error())
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
@@ -116,6 +117,7 @@ func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	flag.IntVar(&workerNum, "workers", 2, "The number of workers for handler in reconcile.")
+	flag.StringVar(&configNetAddr, "config-net-addr", "0.0.0.0:10086", "The address of the config manager.")
 }
 
 func checkCRDExist(fastpodClientset *clientset.Clientset) bool {

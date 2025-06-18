@@ -195,7 +195,7 @@ func NewController(
 // is closed, at which point it will shutdown the workqueue and wait for
 // workers to finish processing their current work items.
 
-func (ctr *Controller) Run(stopCh <-chan struct{}, workers int) error {
+func (ctr *Controller) Run(stopCh <-chan struct{}, workers int, configNetAddr string) error {
 	defer utilruntime.HandleCrash()
 	defer ctr.workqueue.ShutDown()
 
@@ -216,7 +216,7 @@ func (ctr *Controller) Run(stopCh <-chan struct{}, workers int) error {
 	pendingInsuranceDone := make(chan bool)
 	go ctr.pendingInsurance(pendingInsuranceTicker, &pendingInsuranceDone)
 
-	go ctr.startConfigManager(stopCh, ctr.kubeClient)
+	go ctr.startConfigManager(stopCh, ctr.kubeClient, configNetAddr)
 	ctr.log.Info(fmt.Sprintf("starting workers, numuber of workers = %d.", workers))
 	// Launch two workers to process FaSTPod resources
 	for i := 0; i < workers; i++ {

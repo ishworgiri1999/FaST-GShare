@@ -49,8 +49,7 @@ type NodeLiveness struct {
 var (
 	nodesLiveness    map[string]*NodeLiveness
 	nodesLivenessMtx sync.Mutex
-	configNetAddr    string = "0.0.0.0:10087"
-	checkTickerItv   int    = 240
+	checkTickerItv   int = 240
 	kubeClient       kubernetes.Interface
 )
 
@@ -60,7 +59,7 @@ func init() {
 
 // listen and initialize the gpu information received from each node and periodically check liveness of node;
 // send pods' resource configuration to the node's configurator
-func (ctr *Controller) startConfigManager(stopCh <-chan struct{}, kube_client kubernetes.Interface) error {
+func (ctr *Controller) startConfigManager(stopCh <-chan struct{}, kube_client kubernetes.Interface, configNetAddr string) error {
 	klog.Infof("Starting the configuration manager of the controller manager .... ")
 	// listenr of the socket connection from the configurator of each node
 	connListen, err := net.Listen("tcp", configNetAddr)
