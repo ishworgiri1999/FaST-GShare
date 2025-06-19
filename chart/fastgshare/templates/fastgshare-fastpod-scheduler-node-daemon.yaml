@@ -1,0 +1,96 @@
+{{- if .Values.createCRDs }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fastgshare-scheduler-node-daemon
+  namespace: kube-system
+  labels:
+    fastgshare: configurator-scheduler-node-daemon
+spec:
+  selector:
+    matchLabels:
+        fastgsahre: configurator-scheduler-node-daemon
+  template:
+    metadata:
+      labels:
+        fastgsahre: configurator-scheduler-node-daemon
+    spec:
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 0
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      containers:
+      - name: fastpod-fastscheduler-ctn
+        image: {{ .Values.fastgshareNodeDaemon.fastpodFastscheduler.image }}
+        # command: ["/bin/bash", "/wrapper/entrypoint-wrapper.sh"]
+        # args: ["/fastpod/scheduler/config", "/fastpod/scheduler/gpu_clients", "/fastpod/scheduler/log"]
+        volumeMounts:
+        - name: fastpod-library
+          mountPath: "/fastpod/library"
+        - name: fastpod-scheduler
+          mountPath: "/fastpod/scheduler"
+        - name: wrapper-vol
+          mountPath: /wrapper
+      volumes:
+      - name: fastpod-library
+        hostPath:
+          path: "/fastpod/library"
+      - name: fastpod-scheduler
+        hostPath:
+          path: "/fastpod/scheduler"
+      - name: wrapper-vol
+        configMap:
+          name: fastscheduler-wrapper
+          defaultMode: 0755
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastscheduler-wrapper
+  namespace: kube-system
+data:
+  entrypoint-wrapper.sh: |
+    #!/bin/bash
+    #
+    # Created/Modified on Sun May 26 2024
+    #
+    # Author: KontonGu (Jianfeng Gu)
+    # Copyright (c) 2024 TUM - CAPS Cloud
+    # Licensed under the Apache License, Version 2.0 (the "License")
+    #
+    ### The script creates a FaST scheduler instance for each GPU device
+
+    command -v nvidia-smi
+    if [ $? -ne 0 ]; then
+        echo "No GPU available, sleep forever"
+        sleep infinity
+    fi
+
+    function trap_ctrlc ()
+    {
+        echo "Ctrl-C caught...performing clean up"
+        for pid in $pids; do
+            kill $pid
+        done
+        echo "Doing cleanup"
+        exit 0
+    }
+
+    trap "trap_ctrlc" 2
+
+    # each physical gpu have a scheduler port
+    sched_port=52001
+    window_size=40
+
+    for gpu in $(nvidia-smi --format=csv,noheader --query-gpu=uuid); do
+        echo 0 > /fastpod/scheduler/config/$gpu
+        python3 /scheduler_instance.py /fast_scheduler /gpu_client $gpu /fastpod/scheduler/config/$gpu /fastpod/scheduler/gpu_clients \
+        --scheduler_port $sched_port --window_size $window_size --log_dir /fastpod/scheduler/log &
+        pids="$pids $!"
+        sched_port=$(($sched_port+1))
+    done
+
+    wait
+
+{{- end }}

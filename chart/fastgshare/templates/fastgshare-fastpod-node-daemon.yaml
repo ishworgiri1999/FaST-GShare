@@ -114,21 +114,22 @@ spec:
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: fastgshare-node-daemon
+  name: fastgshare-gpu-manager-node-daemon
   namespace: kube-system
   labels:
-    fastgshare: configurator-scheduler-node-daemon
+    fastgshare: gpu-manager-node-daemon
 spec:
   selector:
     matchLabels:
-        fastgsahre: configurator-scheduler-node-daemon
+        fastgshare: gpu-manager-node-daemon
   template:
     metadata:
       labels:
-        fastgsahre: configurator-scheduler-node-daemon
+        fastgshare: gpu-manager-node-daemon
     spec:
       restartPolicy: Always
       terminationGracePeriodSeconds: 0
+      hostIPC: true
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
@@ -141,6 +142,8 @@ spec:
         - containerPort: 5001
           hostPort: 5001
         volumeMounts:
+        - name: tmp-vol
+          mountPath: "/tmp"
         - name: fastpod-library
           mountPath: "/fastpod/library"
         - name: fastpod-scheduler
@@ -151,15 +154,7 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         - name: "FASTFUNC_IP_PORT"
-          value: "fastfunc-controller-manager-svc.kube-system.svc.cluster.local:10088"
-      - name: fastpod-fastscheduler-ctn
-        # image: kontonpuku666/fastpod-fastscheduler:release
-        image: {{ .Values.fastgshareNodeDaemon.fastpodFastscheduler.image }}
-        volumeMounts:
-        - name: fastpod-library
-          mountPath: "/fastpod/library"
-        - name: fastpod-scheduler
-          mountPath: "/fastpod/scheduler"
+          value: "fastfunc-controller-manager-svc.kube-system.svc.cluster.local:10088" 
       volumes:
       - name: fastpod-library
         hostPath:
@@ -167,5 +162,11 @@ spec:
       - name: fastpod-scheduler
         hostPath:
           path: "/fastpod/scheduler"
-      
+
+      - name: tmp-vol
+        hostPath:
+          path: /tmp/
+
+
+
 {{- end }}
