@@ -11,18 +11,18 @@ else
     exit
 fi
 
-# if [ ! -e /fastpod/library/libfast.so.1 ]; then
-#     echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
-#     if [ ! -e /fastpod/library ]; then
-#         sudo mkdir -p /fastpod/library
-#     fi
-#     sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
-# fi
+if [ ! -e /fastpod/library/libfast.so.1 ]; then
+    echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
+    if [ ! -e /fastpod/library ]; then
+        sudo mkdir -p /fastpod/library
+    fi
+    sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
+fi
 
-# if [ ! -e /models ]; then
-#     echo "models dir is missing. creating /models."
-#     sudo mkdir /models
-# fi
+if [ ! -e /models ]; then
+    echo "models dir is missing. creating /models."
+    sudo mkdir /models
+fi
 
 ## clear fastpod existed deployemnt configuration and use helm to intall fast-gshare-fn 
 ## which already includes fastpod deployment
@@ -31,8 +31,7 @@ if [ -n "$existed_fastpods" ]; then
     bash ${project_dir}/yaml/fastgshare/clean_deploy_ctr_mgr_node_daemon.sh
 fi
 
-# echo "creating mps daemon ....."
-# kubectl apply -f ${current_dir}/mps_daemon.yaml
+
 
 ## install FaST-GShare-Function
 kubectl apply -f ${project_dir}/namespace.yaml

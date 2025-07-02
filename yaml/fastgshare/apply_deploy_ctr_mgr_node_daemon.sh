@@ -21,20 +21,20 @@ else
     exit
 fi
 
-## check if the hook library is loaded to the diretory /fastpod/library/
-# if [ ! -e /fastpod/library/libfast.so.1 ]; then
-#     echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
-#     if [ ! -e /fastpod/library ]; then
-#         sudo mkdir /fastpod/library
-#     fi
-#     sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
-# fi
+# check if the hook library is loaded to the diretory /fastpod/library/
+if [ ! -e /fastpod/library/libfast.so.1 ]; then
+    echo "fastpod hook library is missing. copy the file to the /fastpod/library..."
+    if [ ! -e /fastpod/library ]; then
+        sudo mkdir /fastpod/library
+    fi
+    sudo cp -r ${project_dir}/install/libfast.so.1 /fastpod/library/
+fi
 
-# ## check if the models dir is created
-# if [ ! -e /models ]; then
-#     echo "models dir is missing. creating /models."
-#     sudo mkdir /models
-# fi
+## check if the models dir is created
+if [ ! -e /models ]; then
+    echo "models dir is missing. creating /models."
+    sudo mkdir /models
+fi
 
 ## deploy the kube-config configmap if not existed
 existed_config=$(kubectl get configmap kube-config -n kube-system --no-headers)
@@ -44,8 +44,7 @@ if [ -z "${existed_config}" ]; then
 fi
 
 
-kubectl apply -f ${current_dir}/mps_daemon.yaml
-sleep 3
+
 kubectl apply -f ${current_dir}/fastpod-controller-manager.yaml
 sleep 5
 kubectl apply -f ${current_dir}/fastgshare-node-daemon.yaml
